@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { formatVND, formatNumber } from "@/lib/format";
 import { TrendingUp, TrendingDown, Wallet, ShoppingBag, Package, AlertCircle } from "lucide-react";
@@ -7,8 +6,7 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid, Legend,
 } from "recharts";
 import { format, subDays, startOfDay } from "date-fns";
-
-type Order = { total: number; cost_total: number; paid: boolean; created_at: string };
+import { ordersStore, productsStore, type Order } from "@/lib/localStore";
 
 export default function Dashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -16,27 +14,16 @@ export default function Dashboard() {
   const [unpaidCount, setUnpaidCount] = useState(0);
 
   useEffect(() => {
-    (async () => {
-      const since = subDays(new Date(), 29).toISOString();
-      const { data: o } = await supabase
-        .from("orders")
-        .select("total,cost_total,paid,created_at")
-        .gte("created_at", since)
-        .order("created_at");
-      setOrders(o || []);
-      const { count: pc } = await supabase.from("products").select("*", { count: "exact", head: true });
-      setProductCount(pc || 0);
-      const { count: uc } = await supabase
-        .from("orders").select("*", { count: "exact", head: true }).eq("paid", false);
-      setUnpaidCount(uc || 0);
-    })();
+    const since = subDays(new Date(), 29).toISOString();
+    setOrders(ordersStore.listSince(since));
+    setProductCount(productsStore.count());
+    setUnpaidCount(ordersStore.unpaidCount());
   }, []);
 
   const totalRevenue = orders.reduce((s, o) => s + Number(o.total), 0);
   const totalCost = orders.reduce((s, o) => s + Number(o.cost_total), 0);
   const profit = totalRevenue - totalCost;
 
-  // group by day
   const days = Array.from({ length: 30 }).map((_, i) => {
     const d = startOfDay(subDays(new Date(), 29 - i));
     return { date: d, label: format(d, "dd/MM"), revenue: 0, cost: 0 };

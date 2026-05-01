@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,32 +7,18 @@ import { Switch } from "@/components/ui/switch";
 import { Mail, MessageSquare, Hash, Save, Store } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
-
-type Settings = {
-  id?: string;
-  notify_email: string | null;
-  notify_facebook: string | null;
-  notify_discord_webhook: string | null;
-  notify_on_new_order: boolean;
-  notify_on_low_stock: boolean;
-  currency: string;
-  shop_name: string | null;
-};
+import { settingsStore, type AppSettings } from "@/lib/localStore";
 
 function Inner() {
-  const [s, setS] = useState<Settings | null>(null);
+  const [s, setS] = useState<AppSettings | null>(null);
 
   useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from("app_settings").select("*").limit(1).maybeSingle();
-      setS(data as any);
-    })();
+    setS(settingsStore.get());
   }, []);
 
-  const save = async () => {
-    if (!s?.id) return;
-    const { id, ...rest } = s;
-    await supabase.from("app_settings").update(rest).eq("id", id);
+  const save = () => {
+    if (!s) return;
+    settingsStore.save(s);
     toast.success("Đã lưu cài đặt");
   };
 
@@ -43,7 +28,7 @@ function Inner() {
     <div className="space-y-4 max-w-3xl">
       <div>
         <h1 className="text-2xl md:text-3xl font-semibold">Cài đặt</h1>
-        <p className="text-muted-foreground text-sm mt-1">Cài đặt thông báo và ứng dụng</p>
+        <p className="text-muted-foreground text-sm mt-1">Cài đặt thông báo và ứng dụng (lưu trên trình duyệt)</p>
       </div>
 
       <Card className="p-5 shadow-elegant space-y-4">

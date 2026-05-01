@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,11 +8,8 @@ import { Switch } from "@/components/ui/switch";
 import { formatVND } from "@/lib/format";
 import { Search, ScanLine, Trash2, Plus, Minus, ShoppingCart, Package } from "lucide-react";
 import { toast } from "sonner";
+import { productsStore, ordersStore, orderItemsStore, type Product } from "@/lib/localStore";
 
-type Product = {
-  id: string; code: string; name: string; image_url: string | null;
-  cost_price: number; sale_price: number; stock: number;
-};
 type CartItem = Product & { qty: number };
 
 export default function POS() {
@@ -28,9 +24,8 @@ export default function POS() {
   const [saving, setSaving] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
-  const load = async () => {
-    const { data } = await supabase.from("products").select("*").order("name");
-    setProducts(data || []);
+  const load = () => {
+    setProducts(productsStore.list().sort((a, b) => a.name.localeCompare(b.name)));
   };
   useEffect(() => { load(); }, []);
 
@@ -65,43 +60,39 @@ export default function POS() {
   const total = cart.reduce((s, x) => s + x.sale_price * x.qty, 0);
   const costTotal = cart.reduce((s, x) => s + x.cost_price * x.qty, 0);
 
-  const checkout = async () => {
+  const checkout = () => {
     if (cart.length === 0) return toast.error("Giỏ hàng trống");
     setSaving(true);
-    const { data: order, error } = await supabase
-      .from("orders")
-      .insert({
+    try {
+      const order = ordersStore.create({
         customer_name: name || null,
         customer_phone: phone || null,
         customer_address: address || null,
-        total, cost_total: costTotal, paid,
-      })
-      .select()
-      .single();
-    if (error || !order) { toast.error("Lỗi tạo đơn"); setSaving(false); return; }
-
-    const items = cart.map((x) => ({
-      order_id: order.id,
-      product_id: x.id,
-      product_code: x.code,
-      product_name: x.name,
-      image_url: x.image_url,
-      cost_price: x.cost_price,
-      sale_price: x.sale_price,
-      quantity: x.qty,
-      subtotal: x.sale_price * x.qty,
-    }));
-    await supabase.from("order_items").insert(items);
-
-    // decrement stock
-    for (const x of cart) {
-      await supabase.from("products").update({ stock: Math.max(0, x.stock - x.qty) }).eq("id", x.id);
+        total,
+        cost_total: costTotal,
+        paid,
+        note: null,
+      });
+      orderItemsStore.addMany(cart.map((x) => ({
+        order_id: order.id,
+        product_id: x.id,
+        product_code: x.code,
+        product_name: x.name,
+        image_url: x.image_url,
+        cost_price: x.cost_price,
+        sale_price: x.sale_price,
+        quantity: x.qty,
+        subtotal: x.sale_price * x.qty,
+      })));
+      cart.forEach((x) => productsStore.updateStock(x.id, x.stock - x.qty));
+      toast.success("Đã tạo đơn hàng");
+      setCart([]); setName(""); setPhone(""); setAddress(""); setPaid(true);
+      load();
+    } catch {
+      toast.error("Lỗi tạo đơn");
+    } finally {
+      setSaving(false);
     }
-
-    toast.success("Đã tạo đơn hàng");
-    setCart([]); setName(""); setPhone(""); setAddress(""); setPaid(true);
-    load();
-    setSaving(false);
   };
 
   return (
