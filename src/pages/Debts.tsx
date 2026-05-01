@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,35 +7,26 @@ import { format } from "date-fns";
 import { Phone, MapPin, Check, ChevronDown, ChevronUp, Users } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
-
-type Order = {
-  id: string; customer_name: string | null; customer_phone: string | null;
-  customer_address: string | null; total: number; paid: boolean; created_at: string;
-};
-type Item = { product_name: string; quantity: number; sale_price: number; subtotal: number };
+import { ordersStore, orderItemsStore, type Order, type OrderItem } from "@/lib/localStore";
 
 function Inner() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [items, setItems] = useState<Record<string, Item[]>>({});
+  const [items, setItems] = useState<Record<string, OrderItem[]>>({});
   const [open, setOpen] = useState<string | null>(null);
 
-  const load = async () => {
-    const { data } = await supabase.from("orders").select("*").eq("paid", false).order("created_at", { ascending: false });
-    setOrders(data || []);
-  };
+  const load = () => setOrders(ordersStore.unpaid());
   useEffect(() => { load(); }, []);
 
-  const toggle = async (id: string) => {
+  const toggle = (id: string) => {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
     if (!items[id]) {
-      const { data } = await supabase.from("order_items").select("product_name,quantity,sale_price,subtotal").eq("order_id", id);
-      setItems((m) => ({ ...m, [id]: data || [] }));
+      setItems((m) => ({ ...m, [id]: orderItemsStore.forOrder(id) }));
     }
   };
 
-  const markPaid = async (id: string) => {
-    await supabase.from("orders").update({ paid: true }).eq("id", id);
+  const markPaid = (id: string) => {
+    ordersStore.setPaid(id, true);
     toast.success("Đã đánh dấu đã thanh toán");
     load();
   };

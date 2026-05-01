@@ -1,9 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -11,11 +9,7 @@ import { ScanLine, Save, Trash2, Package } from "lucide-react";
 import { toast } from "sonner";
 import { formatVND } from "@/lib/format";
 import { AdminGate } from "@/components/AdminGate";
-
-type Product = {
-  id: string; code: string; name: string; image_url: string | null;
-  cost_price: number; sale_price: number; stock: number;
-};
+import { productsStore, purchasesStore } from "@/lib/localStore";
 
 type Row = {
   key: string;
@@ -34,13 +28,11 @@ function ImportPageInner() {
   const [saving, setSaving] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
-  const handleScan = async (e: React.FormEvent) => {
+  const handleScan = (e: React.FormEvent) => {
     e.preventDefault();
     const code = scan.trim();
     if (!code) return;
-    // tìm sản phẩm có sẵn
-    const { data } = await supabase.from("products").select("*").eq("code", code).maybeSingle();
-    const p = data as Product | null;
+    const p = productsStore.findByCode(code);
     setRows((r) => [
       ...r,
       {
@@ -65,7 +57,7 @@ function ImportPageInner() {
 
   const totalCost = rows.reduce((s, r) => s + Number(r.cost_price) * Number(r.quantity), 0);
 
-  const save = async () => {
+  const save = () => {
     if (rows.length === 0) return toast.error("Chưa có hàng nào");
     for (const r of rows) {
       if (!r.code || !r.name) return toast.error("Cần điền đủ mã & tên sản phẩm");
@@ -73,31 +65,17 @@ function ImportPageInner() {
     setSaving(true);
     try {
       for (const r of rows) {
-        let pid = r.product_id;
-        if (pid) {
-          // update product
-          const { data: existing } = await supabase.from("products").select("stock").eq("id", pid).single();
-          await supabase.from("products").update({
-            name: r.name,
-            image_url: r.image_url || null,
-            cost_price: r.cost_price,
-            sale_price: r.sale_price,
-            stock: (existing?.stock || 0) + Number(r.quantity),
-          }).eq("id", pid);
-        } else {
-          // create
-          const { data: created } = await supabase.from("products").insert({
-            code: r.code,
-            name: r.name,
-            image_url: r.image_url || null,
-            cost_price: r.cost_price,
-            sale_price: r.sale_price,
-            stock: r.quantity,
-          }).select().single();
-          pid = created?.id || null;
-        }
-        await supabase.from("purchases").insert({
-          product_id: pid,
+        productsStore.upsertByCode({
+          code: r.code,
+          name: r.name,
+          image_url: r.image_url || null,
+          cost_price: r.cost_price,
+          sale_price: r.sale_price,
+          stock: r.quantity,
+          addStock: r.quantity,
+        });
+        purchasesStore.add({
+          product_id: r.product_id,
           product_code: r.code,
           product_name: r.name,
           cost_price: r.cost_price,
@@ -108,7 +86,7 @@ function ImportPageInner() {
       }
       toast.success(`Đã nhập ${rows.length} mặt hàng`);
       setRows([]);
-    } catch (err) {
+    } catch {
       toast.error("Lỗi khi lưu");
     } finally {
       setSaving(false);

@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,45 +9,36 @@ import { FileText, Plus, Trash2, Star, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-
-type Tpl = {
-  id: string; name: string; shop_name: string | null; shop_address: string | null;
-  shop_phone: string | null; header_note: string | null; footer_note: string | null;
-  is_default: boolean;
-};
+import { invoiceTemplatesStore, type InvoiceTemplate } from "@/lib/localStore";
 
 function Inner() {
-  const [items, setItems] = useState<Tpl[]>([]);
-  const [editing, setEditing] = useState<Partial<Tpl> | null>(null);
-  const [preview, setPreview] = useState<Tpl | null>(null);
+  const [items, setItems] = useState<InvoiceTemplate[]>([]);
+  const [editing, setEditing] = useState<Partial<InvoiceTemplate> | null>(null);
+  const [preview, setPreview] = useState<InvoiceTemplate | null>(null);
 
-  const load = async () => {
-    const { data } = await supabase.from("invoice_templates").select("*").order("created_at", { ascending: false });
-    setItems(data || []);
-  };
+  const load = () => setItems(invoiceTemplatesStore.list());
   useEffect(() => { load(); }, []);
 
-  const save = async () => {
+  const save = () => {
     if (!editing?.name) return toast.error("Cần nhập tên template");
     if (editing.id) {
-      await supabase.from("invoice_templates").update(editing).eq("id", editing.id);
+      invoiceTemplatesStore.update(editing.id, editing);
     } else {
-      await supabase.from("invoice_templates").insert({ ...editing, name: editing.name } as any);
+      invoiceTemplatesStore.create({ ...editing, name: editing.name });
     }
     setEditing(null);
     toast.success("Đã lưu");
     load();
   };
 
-  const setDefault = async (id: string) => {
-    await supabase.from("invoice_templates").update({ is_default: false }).neq("id", "00000000-0000-0000-0000-000000000000");
-    await supabase.from("invoice_templates").update({ is_default: true }).eq("id", id);
+  const setDefault = (id: string) => {
+    invoiceTemplatesStore.setDefault(id);
     toast.success("Đã đặt làm mặc định");
     load();
   };
 
-  const remove = async (id: string) => {
-    await supabase.from("invoice_templates").delete().eq("id", id);
+  const remove = (id: string) => {
+    invoiceTemplatesStore.remove(id);
     toast.success("Đã xoá");
     load();
   };
