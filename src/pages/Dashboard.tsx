@@ -1,0 +1,134 @@
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Card } from "@/components/ui/card";
+import { formatVND, formatNumber } from "@/lib/format";
+import { TrendingUp, TrendingDown, Wallet, ShoppingBag, Package, AlertCircle } from "lucide-react";
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid, Legend,
+} from "recharts";
+import { format, subDays, startOfDay } from "date-fns";
+
+type Order = { total: number; cost_total: number; paid: boolean; created_at: string };
+
+export default function Dashboard() {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [productCount, setProductCount] = useState(0);
+  const [unpaidCount, setUnpaidCount] = useState(0);
+
+  useEffect(() => {
+    (async () => {
+      const since = subDays(new Date(), 29).toISOString();
+      const { data: o } = await supabase
+        .from("orders")
+        .select("total,cost_total,paid,created_at")
+        .gte("created_at", since)
+        .order("created_at");
+      setOrders(o || []);
+      const { count: pc } = await supabase.from("products").select("*", { count: "exact", head: true });
+      setProductCount(pc || 0);
+      const { count: uc } = await supabase
+        .from("orders").select("*", { count: "exact", head: true }).eq("paid", false);
+      setUnpaidCount(uc || 0);
+    })();
+  }, []);
+
+  const totalRevenue = orders.reduce((s, o) => s + Number(o.total), 0);
+  const totalCost = orders.reduce((s, o) => s + Number(o.cost_total), 0);
+  const profit = totalRevenue - totalCost;
+
+  // group by day
+  const days = Array.from({ length: 30 }).map((_, i) => {
+    const d = startOfDay(subDays(new Date(), 29 - i));
+    return { date: d, label: format(d, "dd/MM"), revenue: 0, cost: 0 };
+  });
+  orders.forEach((o) => {
+    const day = format(startOfDay(new Date(o.created_at)), "dd/MM");
+    const slot = days.find((d) => d.label === day);
+    if (slot) {
+      slot.revenue += Number(o.total);
+      slot.cost += Number(o.cost_total);
+    }
+  });
+
+  const stats = [
+    { label: "Doanh thu (30d)", value: formatVND(totalRevenue), icon: Wallet, color: "text-primary", bg: "bg-accent" },
+    { label: "Tiền nhập (30d)", value: formatVND(totalCost), icon: TrendingDown, color: "text-warning", bg: "bg-warning/10" },
+    { label: "Lợi nhuận (30d)", value: formatVND(profit), icon: TrendingUp, color: "text-success", bg: "bg-success/10" },
+    { label: "Số sản phẩm", value: formatNumber(productCount), icon: Package, color: "text-primary", bg: "bg-accent" },
+    { label: "Đơn chưa TT", value: formatNumber(unpaidCount), icon: AlertCircle, color: "text-destructive", bg: "bg-destructive/10" },
+    { label: "Tổng đơn (30d)", value: formatNumber(orders.length), icon: ShoppingBag, color: "text-primary", bg: "bg-accent" },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl md:text-3xl font-semibold">Bảng điều khiển</h1>
+        <p className="text-muted-foreground text-sm mt-1">Tổng quan doanh thu 30 ngày gần nhất</p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {stats.map((s) => (
+          <Card key={s.label} className="p-4 shadow-elegant hover:shadow-glow transition-shadow">
+            <div className={`w-9 h-9 rounded-md ${s.bg} ${s.color} flex items-center justify-center mb-3`}>
+              <s.icon className="w-4 h-4" />
+            </div>
+            <div className="text-xs text-muted-foreground">{s.label}</div>
+            <div className="text-lg font-semibold mt-1 truncate">{s.value}</div>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="p-4 md:p-6 shadow-elegant">
+        <h3 className="font-semibold mb-4">Doanh thu vs Chi phí nhập</h3>
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={days}>
+              <defs>
+                <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="cost" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(var(--warning))" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="hsl(var(--warning))" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} />
+              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11}
+                tickFormatter={(v) => v >= 1e6 ? `${(v/1e6).toFixed(1)}M` : v >= 1e3 ? `${(v/1e3).toFixed(0)}k` : v}
+              />
+              <Tooltip
+                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                formatter={(v: number) => formatVND(v)}
+              />
+              <Legend />
+              <Area type="monotone" dataKey="revenue" name="Doanh thu" stroke="hsl(var(--primary))" fill="url(#rev)" strokeWidth={2} />
+              <Area type="monotone" dataKey="cost" name="Tiền nhập" stroke="hsl(var(--warning))" fill="url(#cost)" strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      <Card className="p-4 md:p-6 shadow-elegant">
+        <h3 className="font-semibold mb-4">Lợi nhuận theo ngày</h3>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={days.map((d) => ({ ...d, profit: d.revenue - d.cost }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} />
+              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11}
+                tickFormatter={(v) => v >= 1e6 ? `${(v/1e6).toFixed(1)}M` : v >= 1e3 ? `${(v/1e3).toFixed(0)}k` : v}
+              />
+              <Tooltip
+                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                formatter={(v: number) => formatVND(v)}
+              />
+              <Bar dataKey="profit" name="Lợi nhuận" fill="hsl(var(--success))" radius={[4,4,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+    </div>
+  );
+}
