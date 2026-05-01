@@ -14,7 +14,7 @@ function startBackend() {
 
   if (!isDev) {
     process.env.NODE_ENV = 'production'
-    process.env.FRONTEND_DIST_PATH = path.join(app.getAppPath(), 'frontend', 'dist')
+    process.env.FRONTEND_DIST_PATH = path.join(process.resourcesPath, 'frontend', 'dist')
   }
 
   require(backendPath)
