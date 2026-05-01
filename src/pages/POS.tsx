@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { formatVND } from "@/lib/format";
 import { Search, ScanLine, Trash2, Plus, Minus, ShoppingCart, Package } from "lucide-react";
 import { toast } from "sonner";
-import { productsStore, ordersStore, orderItemsStore, type Product } from "@/lib/localStore";
+import { productsStore, ordersStore, orderItemsStore, type Product } from "@/lib/fileStore";
 
 type CartItem = Product & { qty: number };
 
@@ -24,8 +24,9 @@ export default function POS() {
   const [saving, setSaving] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
-  const load = () => {
-    setProducts(productsStore.list().sort((a, b) => a.name.localeCompare(b.name)));
+  const load = async () => {
+    const list = await productsStore.list();
+    setProducts(list.sort((a, b) => a.name.localeCompare(b.name)));
   };
   useEffect(() => { load(); }, []);
 
@@ -60,11 +61,11 @@ export default function POS() {
   const total = cart.reduce((s, x) => s + x.sale_price * x.qty, 0);
   const costTotal = cart.reduce((s, x) => s + x.cost_price * x.qty, 0);
 
-  const checkout = () => {
+  const checkout = async () => {
     if (cart.length === 0) return toast.error("Giỏ hàng trống");
     setSaving(true);
     try {
-      const order = ordersStore.create({
+      const order = await ordersStore.create({
         customer_name: name || null,
         customer_phone: phone || null,
         customer_address: address || null,
@@ -73,7 +74,7 @@ export default function POS() {
         paid,
         note: null,
       });
-      orderItemsStore.addMany(cart.map((x) => ({
+      await orderItemsStore.addMany(cart.map((x) => ({
         order_id: order.id,
         product_id: x.id,
         product_code: x.code,
@@ -84,7 +85,7 @@ export default function POS() {
         quantity: x.qty,
         subtotal: x.sale_price * x.qty,
       })));
-      cart.forEach((x) => productsStore.updateStock(x.id, x.stock - x.qty));
+      await Promise.all(cart.map((x) => productsStore.updateStock(x.id, x.stock - x.qty)));
       toast.success("Đã tạo đơn hàng");
       setCart([]); setName(""); setPhone(""); setAddress(""); setPaid(true);
       load();

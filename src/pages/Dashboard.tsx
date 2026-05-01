@@ -6,7 +6,7 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid, Legend,
 } from "recharts";
 import { format, subDays, startOfDay } from "date-fns";
-import { ordersStore, productsStore, type Order } from "@/lib/localStore";
+import { ordersStore, productsStore, type Order } from "@/lib/fileStore";
 
 export default function Dashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -15,9 +15,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     const since = subDays(new Date(), 29).toISOString();
-    setOrders(ordersStore.listSince(since));
-    setProductCount(productsStore.count());
-    setUnpaidCount(ordersStore.unpaidCount());
+    (async () => {
+      const [recentOrders, count, unpaidCount] = await Promise.all([
+        ordersStore.listSince(since),
+        productsStore.count(),
+        ordersStore.unpaidCount(),
+      ]);
+      setOrders(recentOrders);
+      setProductCount(count);
+      setUnpaidCount(unpaidCount);
+    })();
   }, []);
 
   const totalRevenue = orders.reduce((s, o) => s + Number(o.total), 0);

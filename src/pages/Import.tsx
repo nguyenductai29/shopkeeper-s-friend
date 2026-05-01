@@ -9,7 +9,7 @@ import { ScanLine, Save, Trash2, Package } from "lucide-react";
 import { toast } from "sonner";
 import { formatVND } from "@/lib/format";
 import { AdminGate } from "@/components/AdminGate";
-import { productsStore, purchasesStore } from "@/lib/localStore";
+import { productsStore, purchasesStore } from "@/lib/fileStore";
 
 type Row = {
   key: string;
@@ -28,11 +28,11 @@ function ImportPageInner() {
   const [saving, setSaving] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
-  const handleScan = (e: React.FormEvent) => {
+  const handleScan = async (e: React.FormEvent) => {
     e.preventDefault();
     const code = scan.trim();
     if (!code) return;
-    const p = productsStore.findByCode(code);
+    const p = await productsStore.findByCode(code);
     setRows((r) => [
       ...r,
       {
@@ -57,7 +57,7 @@ function ImportPageInner() {
 
   const totalCost = rows.reduce((s, r) => s + Number(r.cost_price) * Number(r.quantity), 0);
 
-  const save = () => {
+  const save = async () => {
     if (rows.length === 0) return toast.error("Chưa có hàng nào");
     for (const r of rows) {
       if (!r.code || !r.name) return toast.error("Cần điền đủ mã & tên sản phẩm");
@@ -65,7 +65,7 @@ function ImportPageInner() {
     setSaving(true);
     try {
       for (const r of rows) {
-        productsStore.upsertByCode({
+        await productsStore.upsertByCode({
           code: r.code,
           name: r.name,
           image_url: r.image_url || null,
@@ -74,7 +74,7 @@ function ImportPageInner() {
           stock: r.quantity,
           addStock: r.quantity,
         });
-        purchasesStore.add({
+        await purchasesStore.add({
           product_id: r.product_id,
           product_code: r.code,
           product_name: r.name,

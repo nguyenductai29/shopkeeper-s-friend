@@ -9,36 +9,36 @@ import { FileText, Plus, Trash2, Star, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { invoiceTemplatesStore, type InvoiceTemplate } from "@/lib/localStore";
+import { invoiceTemplatesStore, type InvoiceTemplate } from "@/lib/fileStore";
 
 function Inner() {
   const [items, setItems] = useState<InvoiceTemplate[]>([]);
   const [editing, setEditing] = useState<Partial<InvoiceTemplate> | null>(null);
   const [preview, setPreview] = useState<InvoiceTemplate | null>(null);
 
-  const load = () => setItems(invoiceTemplatesStore.list());
+  const load = async () => setItems(await invoiceTemplatesStore.list());
   useEffect(() => { load(); }, []);
 
-  const save = () => {
+  const save = async () => {
     if (!editing?.name) return toast.error("Cần nhập tên template");
     if (editing.id) {
-      invoiceTemplatesStore.update(editing.id, editing);
+      await invoiceTemplatesStore.update(editing.id, editing);
     } else {
-      invoiceTemplatesStore.create({ ...editing, name: editing.name });
+      await invoiceTemplatesStore.create({ ...editing, name: editing.name });
     }
     setEditing(null);
     toast.success("Đã lưu");
     load();
   };
 
-  const setDefault = (id: string) => {
-    invoiceTemplatesStore.setDefault(id);
+  const setDefault = async (id: string) => {
+    await invoiceTemplatesStore.setDefault(id);
     toast.success("Đã đặt làm mặc định");
     load();
   };
 
-  const remove = (id: string) => {
-    invoiceTemplatesStore.remove(id);
+  const remove = async (id: string) => {
+    await invoiceTemplatesStore.remove(id);
     toast.success("Đã xoá");
     load();
   };

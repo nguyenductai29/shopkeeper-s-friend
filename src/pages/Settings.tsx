@@ -7,18 +7,18 @@ import { Switch } from "@/components/ui/switch";
 import { Mail, MessageSquare, Hash, Save, Store } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
-import { settingsStore, type AppSettings } from "@/lib/localStore";
+import { settingsStore, type AppSettings } from "@/lib/fileStore";
 
 function Inner() {
   const [s, setS] = useState<AppSettings | null>(null);
 
   useEffect(() => {
-    setS(settingsStore.get());
+    (async () => { setS(await settingsStore.get()); })();
   }, []);
 
-  const save = () => {
+  const save = async () => {
     if (!s) return;
-    settingsStore.save(s);
+    await settingsStore.save(s);
     toast.success("Đã lưu cài đặt");
   };
 

@@ -7,26 +7,29 @@ import { format } from "date-fns";
 import { Phone, MapPin, Check, ChevronDown, ChevronUp, Users } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
-import { ordersStore, orderItemsStore, type Order, type OrderItem } from "@/lib/localStore";
+import { ordersStore, orderItemsStore, type Order, type OrderItem } from "@/lib/fileStore";
 
 function Inner() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [items, setItems] = useState<Record<string, OrderItem[]>>({});
   const [open, setOpen] = useState<string | null>(null);
 
-  const load = () => setOrders(ordersStore.unpaid());
+  const load = async () => {
+    setOrders(await ordersStore.unpaid());
+  };
   useEffect(() => { load(); }, []);
 
-  const toggle = (id: string) => {
+  const toggle = async (id: string) => {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
     if (!items[id]) {
-      setItems((m) => ({ ...m, [id]: orderItemsStore.forOrder(id) }));
+      const orderItems = await orderItemsStore.forOrder(id);
+      setItems((m) => ({ ...m, [id]: orderItems }));
     }
   };
 
-  const markPaid = (id: string) => {
-    ordersStore.setPaid(id, true);
+  const markPaid = async (id: string) => {
+    await ordersStore.setPaid(id, true);
     toast.success("Đã đánh dấu đã thanh toán");
     load();
   };
