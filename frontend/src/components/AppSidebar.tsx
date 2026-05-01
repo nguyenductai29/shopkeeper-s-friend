@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useAdmin } from "@/contexts/AdminContext";
 import { Button } from "@/components/ui/button";
+import { settingsStore } from "@/lib/fileStore";
 
 const mainItems = [
   { title: "Bảng điều khiển", url: "/", icon: LayoutDashboard },
@@ -42,11 +44,20 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const { pathname } = useLocation();
   const { isAdmin, lock } = useAdmin();
+  const [shopName, setShopName] = useState("ShopFlow");
+
+  useEffect(() => {
+    settingsStore.get().then((s) => {
+      if (s.shop_name) setShopName(s.shop_name);
+    });
+  }, []);
 
   const isActive = (path: string) => pathname === path;
 
   const linkCls = (active: boolean) =>
-    `flex items-center gap-3 w-full px-3 py-2 rounded-md transition-colors ${
+    `flex items-center w-full py-2 rounded-md transition-colors ${
+      collapsed ? "justify-center px-0" : "gap-3 px-3"
+    } ${
       active
         ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
         : "text-sidebar-foreground hover:bg-sidebar-accent/50"
@@ -54,14 +65,14 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" className="border-r">
-      <SidebarHeader className="border-b px-4 py-4">
-        <div className="flex items-center gap-2">
+      <SidebarHeader className={`border-b py-4 ${collapsed ? "px-0" : "px-4"}`}>
+        <div className={`flex items-center gap-2 ${collapsed ? "justify-center" : ""}`}>
           <div className="w-8 h-8 rounded-md gradient-primary flex items-center justify-center shadow-glow shrink-0">
             <Store className="w-4 h-4 text-primary-foreground" />
           </div>
           {!collapsed && (
             <div className="flex flex-col">
-              <span className="font-semibold text-sm leading-tight">ShopFlow</span>
+              <span className="font-semibold text-sm leading-tight">{shopName}</span>
               <span className="text-xs text-muted-foreground">Quản lý bán hàng</span>
             </div>
           )}
