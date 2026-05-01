@@ -2,14 +2,15 @@
   "name": "shopkeeper-s-friend",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"npm:dev:backend\" \"npm:dev:frontend\" \"npm:dev:electron\"",
     "dev:backend": "node backend/index.cjs",
-    "dev:frontend": "vite --config frontend/vite.config.ts",
+    "dev:frontend": "cd frontend && vite",
     "dev:electron": "wait-on http://localhost:8080 && electron .",
     "build": "npm run build:frontend && npm run build:backend",
-    "build:frontend": "vite build --config frontend/vite.config.ts",
+    "build:frontend": "cd frontend && vite build",
     "build:backend": "esbuild backend/index.cjs --bundle --platform=node --outfile=dist-backend/server.cjs",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win"
