@@ -2,7 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const DATA_DIR = path.join(__dirname, 'data');
+// Khi chạy trong Electron, dữ liệu lưu vào userData thay vì thư mục app
+const DATA_DIR = process.env.USER_DATA_PATH
+  ? path.join(process.env.USER_DATA_PATH, 'data')
+  : path.join(__dirname, 'data');
 
 const FILES = {
   products: path.join(DATA_DIR, 'products.json'),

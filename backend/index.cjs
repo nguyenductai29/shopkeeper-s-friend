@@ -17,7 +17,8 @@ app.use('/api/invoice-templates', require('./routes/invoiceTemplates.cjs'));
 app.use('/api/settings', require('./routes/settings.cjs'));
 
 if (process.env.NODE_ENV === 'production') {
-  const distDir = path.join(__dirname, '..', 'frontend', 'dist');
+  // FRONTEND_DIST_PATH được set bởi Electron main process khi chạy trong desktop app
+  const distDir = process.env.FRONTEND_DIST_PATH || path.join(__dirname, '..', 'frontend', 'dist');
   app.use(express.static(distDir));
   app.get('*', (req, res) => res.sendFile(path.join(distDir, 'index.html')));
 }
