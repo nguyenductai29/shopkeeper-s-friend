@@ -5,13 +5,12 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:backend\" \"npm:dev:frontend\" \"npm:dev:electron\"",
+    "dev": "concurrently -k \"npm:dev:frontend\" \"npm:dev:electron\"",
     "dev:backend": "node backend/index.cjs",
     "dev:frontend": "cd frontend && vite",
     "dev:electron": "wait-on http://localhost:8080 && electron .",
-    "build": "npm run build:frontend && npm run build:backend",
+    "build": "npm run build:frontend",
     "build:frontend": "cd frontend && vite build",
-    "build:backend": "esbuild backend/index.cjs --bundle --platform=node --outfile=dist-backend/server.cjs",
     "dist:win": "npm run build && electron-builder --win nsis",
     "dist:win:dir": "npm run build && electron-builder --win dir"
   },
@@ -23,14 +22,11 @@
     },
     "files": [
       "electron/**/*",
+      "backend/**/*",
       "node_modules/**/*",
       "package.json"
     ],
     "extraResources": [
-      {
-        "from": "dist-backend",
-        "to": "backend"
-      },
       {
         "from": "frontend/dist",
         "to": "frontend/dist"
@@ -38,7 +34,9 @@
     ],
     "asar": true,
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "artifactName": "${productName}-${version}-Setup.${ext}",
       "signAndEditExecutable": false
     },
@@ -96,6 +94,7 @@
     "react-router-dom": "^6.30.1",
     "recharts": "^2.15.4",
     "sonner": "^1.7.4",
+    "sql.js": "^1.14.1",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.9",

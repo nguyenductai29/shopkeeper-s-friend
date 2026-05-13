@@ -1,7 +1,9 @@
+'use strict';
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { init } = require('./db.cjs');
+const { init, DATA_DIR } = require('./db.cjs');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -17,15 +19,17 @@ app.use('/api/invoice-templates', require('./routes/invoiceTemplates.cjs'));
 app.use('/api/settings', require('./routes/settings.cjs'));
 
 if (process.env.NODE_ENV === 'production') {
-  // FRONTEND_DIST_PATH được set bởi Electron main process khi chạy trong desktop app
   const distDir = process.env.FRONTEND_DIST_PATH || path.join(__dirname, '..', 'frontend', 'dist');
   app.use(express.static(distDir));
   app.get('*', (req, res) => res.sendFile(path.join(distDir, 'index.html')));
 }
 
-init();
-
-app.listen(PORT, () => {
-  console.log(`Server chạy tại http://localhost:${PORT}`);
-  console.log(`Thư mục data: ${path.join(__dirname, 'data')}`);
+init().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server chạy tại http://localhost:${PORT}`);
+    console.log(`Thư mục data: ${DATA_DIR}`);
+  });
+}).catch(err => {
+  console.error('[init] Lỗi khởi tạo database:', err);
+  process.exit(1);
 });

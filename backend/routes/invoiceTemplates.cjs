@@ -1,16 +1,16 @@
+'use strict';
+
 const express = require('express');
-const { FILES, uuid, now, readFile, writeFile } = require('../db.cjs');
+const { uuid, now, saveDb, queryAll, run, boolRows } = require('../db.cjs');
 
 const router = express.Router();
 
 router.get('/', (req, res) => {
-  const list = readFile(FILES.invoice_templates);
-  res.json(list.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+  res.json(boolRows(queryAll(`SELECT * FROM invoice_templates ORDER BY created_at DESC`)));
 });
 
 router.post('/', (req, res) => {
   const t = req.body;
-  const list = readFile(FILES.invoice_templates);
   const created = {
     id: uuid(),
     name: t.name,
@@ -19,34 +19,37 @@ router.post('/', (req, res) => {
     shop_phone: t.shop_phone ?? null,
     header_note: t.header_note ?? null,
     footer_note: t.footer_note ?? null,
-    is_default: !!t.is_default,
+    is_default: t.is_default ? 1 : 0,
     created_at: now(),
   };
-  list.push(created);
-  writeFile(FILES.invoice_templates, list);
-  res.json(created);
+  run(
+    `INSERT INTO invoice_templates (id,name,shop_name,shop_address,shop_phone,header_note,footer_note,is_default,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    [created.id, created.name, created.shop_name, created.shop_address, created.shop_phone, created.header_note, created.footer_note, created.is_default, created.created_at]
+  );
+  saveDb();
+  res.json({ ...created, is_default: !!created.is_default });
 });
 
 router.put('/:id', (req, res) => {
-  const list = readFile(FILES.invoice_templates);
-  const t = list.find(x => x.id === req.params.id);
-  if (t) {
-    Object.assign(t, req.body);
-    writeFile(FILES.invoice_templates, list);
-  }
+  const t = req.body;
+  run(
+    `UPDATE invoice_templates SET name=?,shop_name=?,shop_address=?,shop_phone=?,header_note=?,footer_note=?,is_default=? WHERE id=?`,
+    [t.name, t.shop_name ?? null, t.shop_address ?? null, t.shop_phone ?? null, t.header_note ?? null, t.footer_note ?? null, t.is_default ? 1 : 0, req.params.id]
+  );
+  saveDb();
   res.json({ ok: true });
 });
 
 router.delete('/:id', (req, res) => {
-  const filtered = readFile(FILES.invoice_templates).filter(x => x.id !== req.params.id);
-  writeFile(FILES.invoice_templates, filtered);
+  run(`DELETE FROM invoice_templates WHERE id=?`, [req.params.id]);
+  saveDb();
   res.json({ ok: true });
 });
 
 router.patch('/:id/default', (req, res) => {
-  const list = readFile(FILES.invoice_templates);
-  list.forEach(t => { t.is_default = t.id === req.params.id; });
-  writeFile(FILES.invoice_templates, list);
+  run(`UPDATE invoice_templates SET is_default = 0`);
+  run(`UPDATE invoice_templates SET is_default = 1 WHERE id=?`, [req.params.id]);
+  saveDb();
   res.json({ ok: true });
 });
 

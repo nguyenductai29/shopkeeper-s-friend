@@ -2,15 +2,45 @@
 
 const { app, BrowserWindow, shell } = require('electron')
 const path = require('node:path')
+const fs = require('node:fs')
+const os = require('node:os')
 
 const isDev = !app.isPackaged
 
-function startBackend() {
-  process.env.USER_DATA_PATH = app.getPath('userData')
+function loadEnv() {
+  const envPath = isDev
+    ? path.join(__dirname, '..', '.env')
+    : path.join(path.dirname(process.execPath), '.env')
+  try {
+    const content = fs.readFileSync(envPath, 'utf-8')
+    for (const line of content.split(/\r?\n/)) {
+      const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/)
+      if (m && process.env[m[1]] === undefined) {
+        process.env[m[1]] = m[2].trim()
+      }
+    }
+  } catch {
+    // .env is optional
+  }
+}
 
-  const backendPath = isDev
-    ? path.join(__dirname, '..', 'backend', 'index.cjs')
-    : path.join(process.resourcesPath, 'backend', 'server.cjs')
+function getDefaultDataDir() {
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+    return path.join(base, "Shopkeeper's Friend")
+  }
+  return path.join(os.homedir(), '.local', 'share', 'shopkeeper-s-friend')
+}
+
+function startBackend() {
+  loadEnv()
+
+  if (!process.env.ELECTRON_DATA_DIR || !process.env.ELECTRON_DATA_DIR.trim()) {
+    process.env.ELECTRON_DATA_DIR = getDefaultDataDir()
+  }
+
+  // backend/ is bundled into the asar in both dev and prod
+  const backendPath = path.join(__dirname, '..', 'backend', 'index.cjs')
 
   if (!isDev) {
     process.env.NODE_ENV = 'production'
@@ -46,7 +76,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   startBackend()
-  setTimeout(createWindow, 1000)
+  setTimeout(createWindow, 1500)
 })
 
 app.on('window-all-closed', () => {
