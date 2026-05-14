@@ -3,7 +3,6 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
-const crypto = require('crypto');
 
 function getDataDir() {
   const envVal = process.env.ELECTRON_DATA_DIR;
@@ -22,7 +21,6 @@ let _db = null;
 
 function getDb() { return _db; }
 
-function uuid() { return crypto.randomUUID(); }
 function now() { return new Date().toISOString(); }
 
 function saveDb() {
@@ -31,7 +29,7 @@ function saveDb() {
 }
 
 const DEFAULT_SETTINGS = {
-  id: 'settings',
+  id: 1,
   shop_name: null,
   currency: 'VND',
   notify_on_low_stock: false,
@@ -78,6 +76,313 @@ function run(sql, params) {
   _db.run(sql, params);
 }
 
+function lastInsertId() {
+  const row = queryGet(`SELECT last_insert_rowid() AS id`);
+  return Number(row?.id || 0);
+}
+
+function isPositiveIntegerId(value) {
+  if (value === null || value === undefined || value === '') return false;
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0;
+}
+
+function hasIntegerPrimaryId(tableName) {
+  const idColumn = queryAll(`PRAGMA table_info(${tableName})`).find((column) => column.name === 'id');
+  return !!idColumn && String(idColumn.type || '').toUpperCase().includes('INT');
+}
+
+function mappedNullableId(map, value) {
+  if (value === null || value === undefined || value === '') return null;
+  return map.get(String(value)) ?? null;
+}
+
+function insertNew(tableName, preserveId, id, columns, values) {
+  const placeholders = columns.map(() => '?').join(',');
+  if (preserveId && isPositiveIntegerId(id)) {
+    const numericId = Number(id);
+    run(
+      `INSERT INTO ${tableName}_new (id,${columns.join(',')}) VALUES (?,${placeholders})`,
+      [numericId, ...values],
+    );
+    return numericId;
+  }
+
+  run(
+    `INSERT INTO ${tableName}_new (${columns.join(',')}) VALUES (${placeholders})`,
+    values,
+  );
+  return lastInsertId();
+}
+
+function migrateAutoIncrementIds() {
+  const appTables = ['products', 'purchases', 'orders', 'order_items', 'invoice_templates'];
+  const needsMigration = appTables.some((tableName) => !hasIntegerPrimaryId(tableName));
+  if (!needsMigration) return;
+
+  console.log('[init] Migrating legacy text ids to INTEGER AUTOINCREMENT ids');
+
+  const products = queryAll(`SELECT * FROM products ORDER BY rowid`);
+  const purchases = queryAll(`SELECT * FROM purchases ORDER BY rowid`);
+  const orders = queryAll(`SELECT * FROM orders ORDER BY rowid`);
+  const orderItems = queryAll(`SELECT * FROM order_items ORDER BY rowid`);
+  const invoiceTemplates = boolRows(queryAll(`SELECT * FROM invoice_templates ORDER BY rowid`));
+
+  const preserveProductIds = products.every((row) => isPositiveIntegerId(row.id));
+  const preservePurchaseIds = purchases.every((row) => isPositiveIntegerId(row.id));
+  const preserveOrderIds = orders.every((row) => isPositiveIntegerId(row.id));
+  const preserveOrderItemIds = orderItems.every((row) => isPositiveIntegerId(row.id));
+  const preserveInvoiceTemplateIds = invoiceTemplates.every((row) => isPositiveIntegerId(row.id));
+
+  const productIdMap = new Map();
+  const orderIdMap = new Map();
+
+  run('BEGIN TRANSACTION');
+  try {
+    appTables.forEach((tableName) => run(`DROP TABLE IF EXISTS ${tableName}_new`));
+
+    run(`
+      CREATE TABLE products_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        name TEXT NOT NULL,
+        image_url TEXT,
+        cost_price REAL NOT NULL DEFAULT 0,
+        sale_price REAL NOT NULL DEFAULT 0,
+        stock REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    run(`
+      CREATE TABLE purchases_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER,
+        product_code TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        cost_price REAL NOT NULL DEFAULT 0,
+        sale_price REAL NOT NULL DEFAULT 0,
+        quantity REAL NOT NULL DEFAULT 0,
+        total REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )
+    `);
+
+    run(`
+      CREATE TABLE orders_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_name TEXT,
+        customer_phone TEXT,
+        customer_address TEXT,
+        total REAL NOT NULL DEFAULT 0,
+        cost_total REAL NOT NULL DEFAULT 0,
+        paid INTEGER NOT NULL DEFAULT 0,
+        note TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
+
+    run(`
+      CREATE TABLE order_items_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        product_id INTEGER,
+        product_code TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        image_url TEXT,
+        cost_price REAL NOT NULL DEFAULT 0,
+        sale_price REAL NOT NULL DEFAULT 0,
+        quantity REAL NOT NULL DEFAULT 0,
+        subtotal REAL NOT NULL DEFAULT 0
+      )
+    `);
+
+    run(`
+      CREATE TABLE invoice_templates_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        shop_name TEXT,
+        shop_address TEXT,
+        shop_phone TEXT,
+        header_note TEXT,
+        footer_note TEXT,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )
+    `);
+
+    for (const product of products) {
+      const newId = insertNew(
+        'products',
+        preserveProductIds,
+        product.id,
+        ['code', 'name', 'image_url', 'cost_price', 'sale_price', 'stock', 'created_at', 'updated_at'],
+        [
+          product.code,
+          product.name,
+          product.image_url ?? null,
+          product.cost_price ?? 0,
+          product.sale_price ?? 0,
+          product.stock ?? 0,
+          product.created_at || now(),
+          product.updated_at || now(),
+        ],
+      );
+      productIdMap.set(String(product.id), newId);
+    }
+
+    for (const purchase of purchases) {
+      insertNew(
+        'purchases',
+        preservePurchaseIds,
+        purchase.id,
+        ['product_id', 'product_code', 'product_name', 'cost_price', 'sale_price', 'quantity', 'total', 'created_at'],
+        [
+          mappedNullableId(productIdMap, purchase.product_id),
+          purchase.product_code,
+          purchase.product_name,
+          purchase.cost_price ?? 0,
+          purchase.sale_price ?? 0,
+          purchase.quantity ?? 0,
+          purchase.total ?? 0,
+          purchase.created_at || now(),
+        ],
+      );
+    }
+
+    for (const order of orders) {
+      const newId = insertNew(
+        'orders',
+        preserveOrderIds,
+        order.id,
+        ['customer_name', 'customer_phone', 'customer_address', 'total', 'cost_total', 'paid', 'note', 'created_at'],
+        [
+          order.customer_name ?? null,
+          order.customer_phone ?? null,
+          order.customer_address ?? null,
+          order.total ?? 0,
+          order.cost_total ?? 0,
+          order.paid ? 1 : 0,
+          order.note ?? null,
+          order.created_at || now(),
+        ],
+      );
+      orderIdMap.set(String(order.id), newId);
+    }
+
+    for (const item of orderItems) {
+      const orderId = mappedNullableId(orderIdMap, item.order_id);
+      if (!orderId) continue;
+      insertNew(
+        'order_items',
+        preserveOrderItemIds,
+        item.id,
+        ['order_id', 'product_id', 'product_code', 'product_name', 'image_url', 'cost_price', 'sale_price', 'quantity', 'subtotal'],
+        [
+          orderId,
+          mappedNullableId(productIdMap, item.product_id),
+          item.product_code,
+          item.product_name,
+          item.image_url ?? null,
+          item.cost_price ?? 0,
+          item.sale_price ?? 0,
+          item.quantity ?? 0,
+          item.subtotal ?? 0,
+        ],
+      );
+    }
+
+    for (const template of invoiceTemplates) {
+      insertNew(
+        'invoice_templates',
+        preserveInvoiceTemplateIds,
+        template.id,
+        ['name', 'shop_name', 'shop_address', 'shop_phone', 'header_note', 'footer_note', 'is_default', 'created_at'],
+        [
+          template.name,
+          template.shop_name ?? null,
+          template.shop_address ?? null,
+          template.shop_phone ?? null,
+          template.header_note ?? null,
+          template.footer_note ?? null,
+          template.is_default ? 1 : 0,
+          template.created_at || now(),
+        ],
+      );
+    }
+
+    appTables.forEach((tableName) => run(`DROP TABLE ${tableName}`));
+    appTables.forEach((tableName) => run(`ALTER TABLE ${tableName}_new RENAME TO ${tableName}`));
+    run('COMMIT');
+  } catch (err) {
+    run('ROLLBACK');
+    throw err;
+  }
+}
+
+function migrateSettingsAutoIncrementId() {
+  if (hasIntegerPrimaryId('settings')) return;
+
+  console.log('[init] Migrating settings id to INTEGER AUTOINCREMENT id');
+
+  const settingsRows = queryAll(`SELECT * FROM settings ORDER BY rowid`);
+  const preserveSettingIds = settingsRows.every((row) => isPositiveIntegerId(row.id));
+
+  run('BEGIN TRANSACTION');
+  try {
+    run(`DROP TABLE IF EXISTS settings_new`);
+    run(`
+      CREATE TABLE settings_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        shop_name TEXT,
+        currency TEXT NOT NULL DEFAULT 'VND',
+        notify_on_low_stock INTEGER NOT NULL DEFAULT 0,
+        notify_on_new_order INTEGER NOT NULL DEFAULT 0,
+        notify_discord_webhook TEXT,
+        notify_facebook TEXT,
+        notify_email TEXT,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
+    for (const setting of settingsRows) {
+      insertNew(
+        'settings',
+        preserveSettingIds,
+        setting.id,
+        [
+          'shop_name',
+          'currency',
+          'notify_on_low_stock',
+          'notify_on_new_order',
+          'notify_discord_webhook',
+          'notify_facebook',
+          'notify_email',
+          'updated_at',
+        ],
+        [
+          setting.shop_name ?? null,
+          setting.currency || 'VND',
+          setting.notify_on_low_stock ? 1 : 0,
+          setting.notify_on_new_order ? 1 : 0,
+          setting.notify_discord_webhook ?? null,
+          setting.notify_facebook ?? null,
+          setting.notify_email ?? null,
+          setting.updated_at || now(),
+        ],
+      );
+    }
+
+    run(`DROP TABLE settings`);
+    run(`ALTER TABLE settings_new RENAME TO settings`);
+    run('COMMIT');
+  } catch (err) {
+    run('ROLLBACK');
+    throw err;
+  }
+}
+
 async function init() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -98,7 +403,7 @@ async function init() {
 
   _db.run(`
     CREATE TABLE IF NOT EXISTS products (
-      id TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT NOT NULL UNIQUE COLLATE NOCASE,
       name TEXT NOT NULL,
       image_url TEXT,
@@ -112,8 +417,8 @@ async function init() {
 
   _db.run(`
     CREATE TABLE IF NOT EXISTS purchases (
-      id TEXT PRIMARY KEY,
-      product_id TEXT,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER,
       product_code TEXT NOT NULL,
       product_name TEXT NOT NULL,
       cost_price REAL NOT NULL DEFAULT 0,
@@ -126,7 +431,7 @@ async function init() {
 
   _db.run(`
     CREATE TABLE IF NOT EXISTS orders (
-      id TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       customer_name TEXT,
       customer_phone TEXT,
       customer_address TEXT,
@@ -140,9 +445,9 @@ async function init() {
 
   _db.run(`
     CREATE TABLE IF NOT EXISTS order_items (
-      id TEXT PRIMARY KEY,
-      order_id TEXT NOT NULL,
-      product_id TEXT,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      product_id INTEGER,
       product_code TEXT NOT NULL,
       product_name TEXT NOT NULL,
       image_url TEXT,
@@ -155,7 +460,7 @@ async function init() {
 
   _db.run(`
     CREATE TABLE IF NOT EXISTS invoice_templates (
-      id TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       shop_name TEXT,
       shop_address TEXT,
@@ -169,7 +474,7 @@ async function init() {
 
   _db.run(`
     CREATE TABLE IF NOT EXISTS settings (
-      id TEXT PRIMARY KEY,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
       shop_name TEXT,
       currency TEXT NOT NULL DEFAULT 'VND',
       notify_on_low_stock INTEGER NOT NULL DEFAULT 0,
@@ -181,10 +486,13 @@ async function init() {
     )
   `);
 
-  const existing = queryGet(`SELECT id FROM settings WHERE id = 'settings'`);
+  migrateAutoIncrementIds();
+  migrateSettingsAutoIncrementId();
+
+  const existing = queryGet(`SELECT id FROM settings ORDER BY id LIMIT 1`);
   if (!existing) {
-    run(`INSERT INTO settings (id, currency, notify_on_low_stock, notify_on_new_order, updated_at)
-         VALUES ('settings', 'VND', 0, 0, ?)`, [now()]);
+    run(`INSERT INTO settings (currency, notify_on_low_stock, notify_on_new_order, updated_at)
+         VALUES ('VND', 0, 0, ?)`, [now()]);
   }
 
   saveDb();
@@ -192,6 +500,6 @@ async function init() {
 }
 
 module.exports = {
-  getDb, DEFAULT_SETTINGS, uuid, now, init, DATA_DIR,
-  boolRow, boolRows, saveDb, queryAll, queryGet, run,
+  getDb, DEFAULT_SETTINGS, now, init, DATA_DIR,
+  boolRow, boolRows, saveDb, queryAll, queryGet, run, lastInsertId,
 };

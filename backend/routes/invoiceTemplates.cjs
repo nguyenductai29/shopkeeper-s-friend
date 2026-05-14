@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { uuid, now, saveDb, queryAll, run, boolRows } = require('../db.cjs');
+const { now, saveDb, queryAll, run, boolRows, lastInsertId } = require('../db.cjs');
 
 const router = express.Router();
 
@@ -12,7 +12,6 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   const t = req.body;
   const created = {
-    id: uuid(),
     name: t.name,
     shop_name: t.shop_name ?? null,
     shop_address: t.shop_address ?? null,
@@ -23,11 +22,12 @@ router.post('/', (req, res) => {
     created_at: now(),
   };
   run(
-    `INSERT INTO invoice_templates (id,name,shop_name,shop_address,shop_phone,header_note,footer_note,is_default,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-    [created.id, created.name, created.shop_name, created.shop_address, created.shop_phone, created.header_note, created.footer_note, created.is_default, created.created_at]
+    `INSERT INTO invoice_templates (name,shop_name,shop_address,shop_phone,header_note,footer_note,is_default,created_at) VALUES (?,?,?,?,?,?,?,?)`,
+    [created.name, created.shop_name, created.shop_address, created.shop_phone, created.header_note, created.footer_note, created.is_default, created.created_at]
   );
+  const id = lastInsertId();
   saveDb();
-  res.json({ ...created, is_default: !!created.is_default });
+  res.json({ id, ...created, is_default: !!created.is_default });
 });
 
 router.put('/:id', (req, res) => {

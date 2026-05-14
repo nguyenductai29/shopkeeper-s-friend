@@ -37,6 +37,7 @@
       "target": [
         "nsis"
       ],
+      "icon": "frontend/public/imo_kome_authentic_logo.ico",
       "artifactName": "${productName}-${version}-Setup.${ext}",
       "signAndEditExecutable": false
     },

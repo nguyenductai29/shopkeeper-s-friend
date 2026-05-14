@@ -7,7 +7,6 @@ import {
   FileText,
   Users,
   Settings,
-  Store,
   Lock,
   LogOut,
 } from "lucide-react";
@@ -67,8 +66,12 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r">
       <SidebarHeader className={`border-b py-4 ${collapsed ? "px-0" : "px-4"}`}>
         <div className={`flex items-center gap-2 ${collapsed ? "justify-center" : ""}`}>
-          <div className="w-8 h-8 rounded-md gradient-primary flex items-center justify-center shadow-glow shrink-0">
-            <Store className="w-4 h-4 text-primary-foreground" />
+          <div className="w-8 h-8 rounded-md bg-white flex items-center justify-center shadow-sm shrink-0 overflow-hidden border">
+            <img
+              src="/imo_kome_authentic_logo.svg"
+              alt={shopName}
+              className="h-full w-full object-contain p-0.5"
+            />
           </div>
           {!collapsed && (
             <div className="flex flex-col">

@@ -1,8 +1,10 @@
 // Simple localStorage-backed data store replacing Supabase.
 // All data lives in the user's browser only.
 
+export type EntityId = number;
+
 export type Product = {
-  id: string;
+  id: EntityId;
   code: string;
   name: string;
   image_url: string | null;
@@ -14,8 +16,8 @@ export type Product = {
 };
 
 export type Purchase = {
-  id: string;
-  product_id: string | null;
+  id: EntityId;
+  product_id: EntityId | null;
   product_code: string;
   product_name: string;
   cost_price: number;
@@ -26,9 +28,9 @@ export type Purchase = {
 };
 
 export type OrderItem = {
-  id: string;
-  order_id: string;
-  product_id: string | null;
+  id: EntityId;
+  order_id: EntityId;
+  product_id: EntityId | null;
   product_code: string;
   product_name: string;
   image_url: string | null;
@@ -39,7 +41,7 @@ export type OrderItem = {
 };
 
 export type Order = {
-  id: string;
+  id: EntityId;
   customer_name: string | null;
   customer_phone: string | null;
   customer_address: string | null;
@@ -51,7 +53,7 @@ export type Order = {
 };
 
 export type InvoiceTemplate = {
-  id: string;
+  id: EntityId;
   name: string;
   shop_name: string | null;
   shop_address: string | null;
@@ -63,7 +65,7 @@ export type InvoiceTemplate = {
 };
 
 export type AppSettings = {
-  id: string;
+  id: EntityId;
   shop_name: string | null;
   currency: string;
   notify_on_low_stock: boolean;
@@ -83,11 +85,16 @@ const KEYS = {
   app_settings: "ls_app_settings",
 } as const;
 
-const uuid = () =>
-  (crypto as any).randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now();
+const SEQ_PREFIX = "ls_seq_";
+const MIGRATION_KEY = "ls_numeric_id_migration_v1";
 const now = () => new Date().toISOString();
 
+function canUseStorage() {
+  return typeof localStorage !== "undefined";
+}
+
 function read<T>(key: string): T[] {
+  if (!canUseStorage()) return [];
   try {
     const raw = localStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T[]) : [];
@@ -96,8 +103,122 @@ function read<T>(key: string): T[] {
   }
 }
 function write<T>(key: string, data: T[]) {
+  if (!canUseStorage()) return;
   localStorage.setItem(key, JSON.stringify(data));
 }
+
+function seqKey(key: string) {
+  return `${SEQ_PREFIX}${key}`;
+}
+
+function isPositiveIntegerId(value: unknown) {
+  if (value === null || value === undefined || value === "") return false;
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0;
+}
+
+function setNextId(key: string, rows: Array<{ id: unknown }>) {
+  if (!canUseStorage()) return;
+  const maxId = rows.reduce((max, row) => {
+    const numeric = Number(row.id);
+    return Number.isInteger(numeric) && numeric > max ? numeric : max;
+  }, 0);
+  localStorage.setItem(seqKey(key), String(maxId + 1));
+}
+
+function nextId(key: string) {
+  if (!canUseStorage()) return 1;
+  const rows = read<{ id: unknown }>(key);
+  const maxExisting = rows.reduce((max, row) => {
+    const numeric = Number(row.id);
+    return Number.isInteger(numeric) && numeric > max ? numeric : max;
+  }, 0);
+  const stored = Number(localStorage.getItem(seqKey(key)) || 0);
+  const id = Math.max(stored, maxExisting + 1, 1);
+  localStorage.setItem(seqKey(key), String(id + 1));
+  return id;
+}
+
+function migrateRows<T extends { id: unknown }>(rows: T[], key: string) {
+  const preserveIds = rows.every((row) => isPositiveIntegerId(row.id));
+  const used = new Set<number>();
+  let next = 1;
+  const map = new Map<string, EntityId>();
+
+  const migrated = rows.map((row) => {
+    let id: EntityId;
+    if (preserveIds) {
+      id = Number(row.id);
+    } else {
+      while (used.has(next)) next += 1;
+      id = next;
+    }
+    used.add(id);
+    map.set(String(row.id), id);
+    return { ...row, id };
+  });
+
+  setNextId(key, migrated);
+  return { rows: migrated, map };
+}
+
+function mapOptionalId(map: Map<string, EntityId>, value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  return map.get(String(value)) ?? null;
+}
+
+function migrateLegacyLocalStorageIds() {
+  if (!canUseStorage()) return;
+  if (localStorage.getItem(MIGRATION_KEY) === "done") return;
+
+  const products = read<any>(KEYS.products);
+  const purchases = read<any>(KEYS.purchases);
+  const orders = read<any>(KEYS.orders);
+  const orderItems = read<any>(KEYS.order_items);
+  const invoiceTemplates = read<any>(KEYS.invoice_templates);
+
+  const migratedProducts = migrateRows(products, KEYS.products);
+  const migratedOrders = migrateRows(orders, KEYS.orders);
+  const migratedPurchases = migrateRows(purchases, KEYS.purchases);
+  const migratedOrderItems = migrateRows(orderItems, KEYS.order_items);
+  const migratedInvoiceTemplates = migrateRows(invoiceTemplates, KEYS.invoice_templates);
+
+  write(
+    KEYS.products,
+    migratedProducts.rows.map((row) => ({ ...row, id: Number(row.id) })),
+  );
+  write(
+    KEYS.purchases,
+    migratedPurchases.rows.map((row) => ({
+      ...row,
+      id: Number(row.id),
+      product_id: mapOptionalId(migratedProducts.map, row.product_id),
+    })),
+  );
+  write(
+    KEYS.orders,
+    migratedOrders.rows.map((row) => ({ ...row, id: Number(row.id) })),
+  );
+  write(
+    KEYS.order_items,
+    migratedOrderItems.rows
+      .map((row) => ({
+        ...row,
+        id: Number(row.id),
+        order_id: mapOptionalId(migratedOrders.map, row.order_id),
+        product_id: mapOptionalId(migratedProducts.map, row.product_id),
+      }))
+      .filter((row) => row.order_id !== null),
+  );
+  write(
+    KEYS.invoice_templates,
+    migratedInvoiceTemplates.rows.map((row) => ({ ...row, id: Number(row.id) })),
+  );
+
+  localStorage.setItem(MIGRATION_KEY, "done");
+}
+
+migrateLegacyLocalStorageIds();
 
 // ===== Products =====
 export const productsStore = {
@@ -107,7 +228,7 @@ export const productsStore = {
   findByCode(code: string): Product | undefined {
     return this.list().find((p) => p.code.toLowerCase() === code.toLowerCase());
   },
-  get(id: string): Product | undefined {
+  get(id: EntityId): Product | undefined {
     return this.list().find((p) => p.id === id);
   },
   upsertByCode(input: Omit<Product, "id" | "created_at" | "updated_at"> & { addStock?: number }): Product {
@@ -125,7 +246,7 @@ export const productsStore = {
       return existing;
     }
     const created: Product = {
-      id: uuid(),
+      id: nextId(KEYS.products),
       code: input.code,
       name: input.name,
       image_url: input.image_url,
@@ -139,7 +260,7 @@ export const productsStore = {
     write(KEYS.products, list);
     return created;
   },
-  updateStock(id: string, newStock: number) {
+  updateStock(id: EntityId, newStock: number) {
     const list = this.list();
     const p = list.find((x) => x.id === id);
     if (p) {
@@ -160,7 +281,7 @@ export const purchasesStore = {
   },
   add(p: Omit<Purchase, "id" | "created_at">): Purchase {
     const list = this.list();
-    const created: Purchase = { ...p, id: uuid(), created_at: now() };
+    const created: Purchase = { ...p, id: nextId(KEYS.purchases), created_at: now() };
     list.push(created);
     write(KEYS.purchases, list);
     return created;
@@ -183,12 +304,12 @@ export const ordersStore = {
   },
   create(o: Omit<Order, "id" | "created_at">): Order {
     const list = read<Order>(KEYS.orders);
-    const created: Order = { ...o, id: uuid(), created_at: now() };
+    const created: Order = { ...o, id: nextId(KEYS.orders), created_at: now() };
     list.push(created);
     write(KEYS.orders, list);
     return created;
   },
-  setPaid(id: string, paid: boolean) {
+  setPaid(id: EntityId, paid: boolean) {
     const list = read<Order>(KEYS.orders);
     const o = list.find((x) => x.id === id);
     if (o) {
@@ -202,12 +323,12 @@ export const orderItemsStore = {
   list(): OrderItem[] {
     return read<OrderItem>(KEYS.order_items);
   },
-  forOrder(orderId: string): OrderItem[] {
+  forOrder(orderId: EntityId): OrderItem[] {
     return this.list().filter((i) => i.order_id === orderId);
   },
   addMany(items: Omit<OrderItem, "id">[]) {
     const list = this.list();
-    items.forEach((i) => list.push({ ...i, id: uuid() }));
+    items.forEach((i) => list.push({ ...i, id: nextId(KEYS.order_items) }));
     write(KEYS.order_items, list);
   },
 };
@@ -222,7 +343,7 @@ export const invoiceTemplatesStore = {
   create(t: Partial<InvoiceTemplate> & { name: string }): InvoiceTemplate {
     const list = read<InvoiceTemplate>(KEYS.invoice_templates);
     const created: InvoiceTemplate = {
-      id: uuid(),
+      id: nextId(KEYS.invoice_templates),
       name: t.name,
       shop_name: t.shop_name ?? null,
       shop_address: t.shop_address ?? null,
@@ -236,7 +357,7 @@ export const invoiceTemplatesStore = {
     write(KEYS.invoice_templates, list);
     return created;
   },
-  update(id: string, patch: Partial<InvoiceTemplate>) {
+  update(id: EntityId, patch: Partial<InvoiceTemplate>) {
     const list = read<InvoiceTemplate>(KEYS.invoice_templates);
     const t = list.find((x) => x.id === id);
     if (t) {
@@ -244,10 +365,10 @@ export const invoiceTemplatesStore = {
       write(KEYS.invoice_templates, list);
     }
   },
-  remove(id: string) {
+  remove(id: EntityId) {
     write(KEYS.invoice_templates, read<InvoiceTemplate>(KEYS.invoice_templates).filter((x) => x.id !== id));
   },
-  setDefault(id: string) {
+  setDefault(id: EntityId) {
     const list = read<InvoiceTemplate>(KEYS.invoice_templates);
     list.forEach((t) => (t.is_default = t.id === id));
     write(KEYS.invoice_templates, list);
@@ -256,7 +377,7 @@ export const invoiceTemplatesStore = {
 
 // ===== Settings (single row) =====
 const DEFAULT_SETTINGS: AppSettings = {
-  id: "settings",
+  id: 1,
   shop_name: null,
   currency: "VND",
   notify_on_low_stock: false,
@@ -275,13 +396,18 @@ export const settingsStore = {
         localStorage.setItem(KEYS.app_settings, JSON.stringify(DEFAULT_SETTINGS));
         return { ...DEFAULT_SETTINGS };
       }
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw);
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        id: isPositiveIntegerId(parsed.id) ? Number(parsed.id) : DEFAULT_SETTINGS.id,
+      };
     } catch {
       return { ...DEFAULT_SETTINGS };
     }
   },
   save(s: AppSettings) {
-    const next = { ...s, updated_at: now() };
+    const next = { ...s, id: isPositiveIntegerId(s.id) ? Number(s.id) : DEFAULT_SETTINGS.id, updated_at: now() };
     localStorage.setItem(KEYS.app_settings, JSON.stringify(next));
     return next;
   },

@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { uuid, now, saveDb, queryAll, run } = require('../db.cjs');
+const { now, saveDb, queryAll, run, lastInsertId } = require('../db.cjs');
 
 const router = express.Router();
 
@@ -12,7 +12,6 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   const b = req.body;
   const created = {
-    id: uuid(),
     product_id: b.product_id ?? null,
     product_code: b.product_code,
     product_name: b.product_name,
@@ -23,11 +22,12 @@ router.post('/', (req, res) => {
     created_at: now(),
   };
   run(
-    `INSERT INTO purchases (id,product_id,product_code,product_name,cost_price,sale_price,quantity,total,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-    [created.id, created.product_id, created.product_code, created.product_name, created.cost_price, created.sale_price, created.quantity, created.total, created.created_at]
+    `INSERT INTO purchases (product_id,product_code,product_name,cost_price,sale_price,quantity,total,created_at) VALUES (?,?,?,?,?,?,?,?)`,
+    [created.product_id, created.product_code, created.product_name, created.cost_price, created.sale_price, created.quantity, created.total, created.created_at]
   );
+  const id = lastInsertId();
   saveDb();
-  res.json(created);
+  res.json({ id, ...created });
 });
 
 module.exports = router;

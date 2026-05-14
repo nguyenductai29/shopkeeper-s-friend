@@ -4,52 +4,76 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatVND } from "@/lib/format";
 import { format } from "date-fns";
-import { Phone, MapPin, Check, ChevronDown, ChevronUp, Users } from "lucide-react";
+import { Phone, MapPin, Check, ChevronDown, ChevronUp, Users, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
-import { ordersStore, orderItemsStore, type Order, type OrderItem } from "@/lib/fileStore";
+import { ordersStore, orderItemsStore, type EntityId, type Order, type OrderItem } from "@/lib/fileStore";
+import { exportRowsToExcel } from "@/lib/exportExcel";
 
 function Inner() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [items, setItems] = useState<Record<string, OrderItem[]>>({});
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<EntityId | null>(null);
 
   const load = async () => {
     setOrders(await ordersStore.unpaid());
   };
   useEffect(() => { load(); }, []);
 
-  const toggle = async (id: string) => {
+  const toggle = async (id: EntityId) => {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
-    if (!items[id]) {
+    if (!items[String(id)]) {
       const orderItems = await orderItemsStore.forOrder(id);
-      setItems((m) => ({ ...m, [id]: orderItems }));
+      setItems((m) => ({ ...m, [String(id)]: orderItems }));
     }
   };
 
-  const markPaid = async (id: string) => {
+  const markPaid = async (id: EntityId) => {
     await ordersStore.setPaid(id, true);
     toast.success("Đã đánh dấu đã thanh toán");
     load();
   };
 
+  const exportDebts = () => {
+    if (orders.length === 0) return toast.error("Không có công nợ để xuất");
+    exportRowsToExcel({
+      filename: `cong-no-${format(new Date(), "yyyyMMdd-HHmm")}.xls`,
+      sheetName: "Cong no",
+      rows: orders,
+      columns: [
+        { header: "ID", value: "id" },
+        { header: "Thời gian", value: (row) => format(new Date(row.created_at), "dd/MM/yyyy HH:mm") },
+        { header: "Khách hàng", value: (row) => row.customer_name || "Khách lẻ" },
+        { header: "SĐT", value: (row) => row.customer_phone || "" },
+        { header: "Địa chỉ", value: (row) => row.customer_address || "" },
+        { header: "Tổng nợ", value: (row) => Number(row.total) },
+        { header: "Ghi chú", value: (row) => row.note || "" },
+      ],
+    });
+  };
+
   const totalDebt = orders.reduce((s, o) => s + Number(o.total), 0);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl md:text-3xl font-semibold">Công nợ khách hàng</h1>
-        <p className="text-muted-foreground text-sm mt-1">Đơn hàng chưa thanh toán</p>
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+      <div className="flex shrink-0 items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold">Công nợ khách hàng</h1>
+          <p className="text-muted-foreground text-sm mt-1">Đơn hàng chưa thanh toán</p>
+        </div>
+        <Button variant="outline" onClick={exportDebts} disabled={orders.length === 0}>
+          <FileSpreadsheet className="w-4 h-4 mr-2" /> Xuất Excel
+        </Button>
       </div>
 
-      <div className="grid sm:grid-cols-3 gap-3">
-        <Card className="p-4"><div className="text-xs text-muted-foreground">Số đơn nợ</div><div className="text-2xl font-semibold mt-1">{orders.length}</div></Card>
-        <Card className="p-4"><div className="text-xs text-muted-foreground">Tổng công nợ</div><div className="text-2xl font-semibold mt-1 text-destructive">{formatVND(totalDebt)}</div></Card>
-        <Card className="p-4"><div className="text-xs text-muted-foreground">Khách độc lập</div><div className="text-2xl font-semibold mt-1">{new Set(orders.map(o => o.customer_phone || o.customer_name)).size}</div></Card>
+      <div className="grid shrink-0 sm:grid-cols-3 gap-3">
+        <Card className="p-3"><div className="text-xs text-muted-foreground">Số đơn nợ</div><div className="text-2xl font-semibold mt-1">{orders.length}</div></Card>
+        <Card className="p-3"><div className="text-xs text-muted-foreground">Tổng công nợ</div><div className="text-2xl font-semibold mt-1 text-destructive">{formatVND(totalDebt)}</div></Card>
+        <Card className="p-3"><div className="text-xs text-muted-foreground">Khách độc lập</div><div className="text-2xl font-semibold mt-1">{new Set(orders.map(o => o.customer_phone || o.customer_name)).size}</div></Card>
       </div>
 
-      <div className="space-y-2">
+      <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
         {orders.length === 0 && (
           <Card className="p-12 text-center text-muted-foreground">
             <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
@@ -84,7 +108,7 @@ function Inner() {
             </div>
             {open === o.id && (
               <div className="border-t bg-muted/30 px-4 py-3 space-y-1">
-                {(items[o.id] || []).map((it, i) => (
+                {(items[String(o.id)] || []).map((it, i) => (
                   <div key={i} className="flex justify-between text-sm">
                     <span>{it.product_name} <span className="text-muted-foreground">× {it.quantity}</span></span>
                     <span className="font-medium">{formatVND(it.subtotal)}</span>

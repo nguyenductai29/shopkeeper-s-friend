@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { formatVND } from "@/lib/format";
 import { Search, ScanLine, Trash2, Plus, Minus, ShoppingCart, Package } from "lucide-react";
 import { toast } from "sonner";
-import { productsStore, ordersStore, orderItemsStore, type Product } from "@/lib/fileStore";
+import { productsStore, ordersStore, orderItemsStore, type EntityId, type Product } from "@/lib/fileStore";
 
 type CartItem = Product & { qty: number };
 
@@ -53,10 +53,10 @@ export default function POS() {
     scanRef.current?.focus();
   };
 
-  const updateQty = (id: string, delta: number) => {
+  const updateQty = (id: EntityId, delta: number) => {
     setCart((c) => c.map((x) => x.id === id ? { ...x, qty: Math.max(1, x.qty + delta) } : x));
   };
-  const removeItem = (id: string) => setCart((c) => c.filter((x) => x.id !== id));
+  const removeItem = (id: EntityId) => setCart((c) => c.filter((x) => x.id !== id));
 
   const total = cart.reduce((s, x) => s + x.sale_price * x.qty, 0);
   const costTotal = cart.reduce((s, x) => s + x.cost_price * x.qty, 0);
@@ -97,16 +97,16 @@ export default function POS() {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+      <div className="shrink-0">
         <h1 className="text-2xl md:text-3xl font-semibold">Bán hàng</h1>
         <p className="text-muted-foreground text-sm mt-1">Chọn sản phẩm hoặc quét mã để thêm vào giỏ</p>
       </div>
 
-      <div className="grid lg:grid-cols-[1fr_420px] gap-4">
+      <div className="grid flex-1 min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_400px]">
         {/* Products */}
-        <div className="space-y-3">
-          <div className="flex flex-col sm:flex-row gap-2">
+        <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
+          <div className="flex shrink-0 flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input placeholder="Tìm sản phẩm..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -120,7 +120,7 @@ export default function POS() {
             </form>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-2 gap-3 overflow-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
             {filtered.length === 0 && (
               <Card className="col-span-full p-12 text-center text-muted-foreground">
                 <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
@@ -152,13 +152,13 @@ export default function POS() {
         </div>
 
         {/* Cart */}
-        <Card className="p-4 shadow-elegant h-fit lg:sticky lg:top-20">
-          <div className="flex items-center gap-2 mb-3">
+        <Card className="flex h-full min-h-0 flex-col overflow-hidden p-3 shadow-elegant">
+          <div className="mb-3 flex shrink-0 items-center gap-2">
             <ShoppingCart className="w-4 h-4 text-primary" />
             <h3 className="font-semibold">Giỏ hàng ({cart.length})</h3>
           </div>
 
-          <div className="space-y-2 max-h-72 overflow-auto -mx-1 px-1">
+          <div className="-mx-1 min-h-0 flex-1 space-y-2 overflow-auto px-1">
             {cart.length === 0 && <div className="text-sm text-muted-foreground py-6 text-center">Chưa có sản phẩm</div>}
             {cart.map((x) => (
               <div key={x.id} className="flex items-center gap-2 p-2 rounded-md bg-muted/40">
@@ -176,9 +176,9 @@ export default function POS() {
             ))}
           </div>
 
-          <div className="border-t my-3" />
+          <div className="my-3 shrink-0 border-t" />
 
-          <div className="space-y-2">
+          <div className="shrink-0 space-y-2">
             <div>
               <Label className="text-xs">Tên khách</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Nguyễn Văn A" />
@@ -197,7 +197,7 @@ export default function POS() {
             </div>
           </div>
 
-          <div className="border-t mt-3 pt-3 space-y-1">
+          <div className="mt-3 shrink-0 space-y-1 border-t pt-3">
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>Tổng SP</span><span>{cart.reduce((s, x) => s + x.qty, 0)}</span>
             </div>
@@ -206,7 +206,7 @@ export default function POS() {
             </div>
           </div>
 
-          <Button className="w-full mt-3" size="lg" onClick={checkout} disabled={saving}>
+          <Button className="mt-3 w-full shrink-0" size="lg" onClick={checkout} disabled={saving}>
             {saving ? "Đang xử lý..." : "Tạo đơn hàng"}
           </Button>
         </Card>

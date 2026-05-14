@@ -3,9 +3,12 @@
 const { app, BrowserWindow, shell } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
+const http = require('node:http')
 const os = require('node:os')
 
 const isDev = !app.isPackaged
+const WINDOW_ICON_NAME = 'imo_kome_authentic_logo.ico'
+const BACKEND_HOST = '127.0.0.1'
 
 function loadEnv() {
   const envPath = isDev
@@ -32,11 +35,54 @@ function getDefaultDataDir() {
   return path.join(os.homedir(), '.local', 'share', 'shopkeeper-s-friend')
 }
 
-function startBackend() {
+function getWindowIconPath() {
+  return isDev
+    ? path.join(__dirname, '..', 'frontend', 'public', WINDOW_ICON_NAME)
+    : path.join(process.resourcesPath, 'frontend', 'dist', WINDOW_ICON_NAME)
+}
+
+function getBackendPort() {
+  return Number(process.env.PORT || 3001)
+}
+
+function getBackendUrl() {
+  return `http://localhost:${getBackendPort()}`
+}
+
+function isBackendResponding(port) {
+  return new Promise((resolve) => {
+    const req = http.get(
+      {
+        host: BACKEND_HOST,
+        port,
+        path: '/api/products',
+        timeout: 800,
+      },
+      (res) => {
+        res.resume()
+        resolve(res.statusCode >= 200 && res.statusCode < 500)
+      },
+    )
+
+    req.on('timeout', () => {
+      req.destroy()
+      resolve(false)
+    })
+    req.on('error', () => resolve(false))
+  })
+}
+
+async function startBackend() {
   loadEnv()
 
   if (!process.env.ELECTRON_DATA_DIR || !process.env.ELECTRON_DATA_DIR.trim()) {
     process.env.ELECTRON_DATA_DIR = getDefaultDataDir()
+  }
+
+  const backendPort = getBackendPort()
+  if (isDev && await isBackendResponding(backendPort)) {
+    console.log(`[main] Reusing existing backend at ${getBackendUrl()}`)
+    return
   }
 
   // backend/ is bundled into the asar in both dev and prod
@@ -54,8 +100,12 @@ let win = null
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: 1440,
+    height: 960,
+    minWidth: 1100,
+    minHeight: 720,
+    autoHideMenuBar: true,
+    icon: getWindowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
@@ -64,6 +114,7 @@ function createWindow() {
     show: false,
   })
 
+  win.maximize()
   win.once('ready-to-show', () => win && win.show())
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -71,21 +122,33 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  win.loadURL(isDev ? 'http://localhost:8080' : 'http://localhost:3001')
+  win.loadURL(isDev ? 'http://localhost:8080' : getBackendUrl())
 }
 
-app.whenReady().then(() => {
-  startBackend()
-  setTimeout(createWindow, 1500)
-})
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-    win = null
-  }
-})
+if (!gotSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.focus()
+  })
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
-})
+  app.whenReady().then(async () => {
+    await startBackend()
+    setTimeout(createWindow, 1500)
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
+      win = null
+    }
+  })
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+}

@@ -54,16 +54,16 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div>
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+      <div className="shrink-0">
         <h1 className="text-2xl md:text-3xl font-semibold">Bảng điều khiển</h1>
         <p className="text-muted-foreground text-sm mt-1">Tổng quan doanh thu 30 ngày gần nhất</p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid shrink-0 grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {stats.map((s) => (
-          <Card key={s.label} className="p-4 shadow-elegant hover:shadow-glow transition-shadow">
-            <div className={`w-9 h-9 rounded-md ${s.bg} ${s.color} flex items-center justify-center mb-3`}>
+          <Card key={s.label} className="p-3 shadow-elegant hover:shadow-glow transition-shadow">
+            <div className={`w-8 h-8 rounded-md ${s.bg} ${s.color} flex items-center justify-center mb-2`}>
               <s.icon className="w-4 h-4" />
             </div>
             <div className="text-xs text-muted-foreground">{s.label}</div>
@@ -72,57 +72,59 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <Card className="p-4 md:p-6 shadow-elegant">
-        <h3 className="font-semibold mb-4">Doanh thu vs Chi phí nhập</h3>
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={days}>
-              <defs>
-                <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="cost" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--warning))" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="hsl(var(--warning))" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} />
-              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11}
-                tickFormatter={(v) => v >= 1e6 ? `${(v/1e6).toFixed(1)}M` : v >= 1e3 ? `${(v/1e3).toFixed(0)}k` : v}
-              />
-              <Tooltip
-                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
-                formatter={(v: number) => formatVND(v)}
-              />
-              <Legend />
-              <Area type="monotone" dataKey="revenue" name="Doanh thu" stroke="hsl(var(--primary))" fill="url(#rev)" strokeWidth={2} />
-              <Area type="monotone" dataKey="cost" name="Tiền nhập" stroke="hsl(var(--warning))" fill="url(#cost)" strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
+      <div className="grid flex-1 min-h-0 grid-rows-2 gap-3">
+        <Card className="flex min-h-0 flex-col p-4 shadow-elegant">
+          <h3 className="mb-2 shrink-0 font-semibold">Doanh thu vs Chi phí nhập</h3>
+          <div className="min-h-0 flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={days}>
+                <defs>
+                  <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="cost" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="hsl(var(--warning))" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="hsl(var(--warning))" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11}
+                  tickFormatter={(v) => v >= 1e6 ? `${(v/1e6).toFixed(1)}M` : v >= 1e3 ? `${(v/1e3).toFixed(0)}k` : v}
+                />
+                <Tooltip
+                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                  formatter={(v: number) => formatVND(v)}
+                />
+                <Legend />
+                <Area type="monotone" dataKey="revenue" name="Doanh thu" stroke="hsl(var(--primary))" fill="url(#rev)" strokeWidth={2} />
+                <Area type="monotone" dataKey="cost" name="Tiền nhập" stroke="hsl(var(--warning))" fill="url(#cost)" strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
 
-      <Card className="p-4 md:p-6 shadow-elegant">
-        <h3 className="font-semibold mb-4">Lợi nhuận theo ngày</h3>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={days.map((d) => ({ ...d, profit: d.revenue - d.cost }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} />
-              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11}
-                tickFormatter={(v) => v >= 1e6 ? `${(v/1e6).toFixed(1)}M` : v >= 1e3 ? `${(v/1e3).toFixed(0)}k` : v}
-              />
-              <Tooltip
-                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
-                formatter={(v: number) => formatVND(v)}
-              />
-              <Bar dataKey="profit" name="Lợi nhuận" fill="hsl(var(--success))" radius={[4,4,0,0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
+        <Card className="flex min-h-0 flex-col p-4 shadow-elegant">
+          <h3 className="mb-2 shrink-0 font-semibold">Lợi nhuận theo ngày</h3>
+          <div className="min-h-0 flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={days.map((d) => ({ ...d, profit: d.revenue - d.cost }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11}
+                  tickFormatter={(v) => v >= 1e6 ? `${(v/1e6).toFixed(1)}M` : v >= 1e3 ? `${(v/1e3).toFixed(0)}k` : v}
+                />
+                <Tooltip
+                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                  formatter={(v: number) => formatVND(v)}
+                />
+                <Bar dataKey="profit" name="Lợi nhuận" fill="hsl(var(--success))" radius={[4,4,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }

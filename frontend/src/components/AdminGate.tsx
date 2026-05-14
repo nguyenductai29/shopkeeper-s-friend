@@ -13,7 +13,7 @@ export function AdminGate({ children }: { children: React.ReactNode }) {
   if (isAdmin) return <>{children}</>;
 
   return (
-    <div className="flex items-center justify-center min-h-[60vh] px-4">
+    <div className="flex h-full items-center justify-center px-4">
       <Card className="w-full max-w-md p-8 shadow-elegant">
         <div className="flex flex-col items-center text-center mb-6">
           <div className="w-14 h-14 rounded-full gradient-primary flex items-center justify-center mb-4 shadow-glow">

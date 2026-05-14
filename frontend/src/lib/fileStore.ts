@@ -8,9 +8,10 @@ export type {
   OrderItem,
   InvoiceTemplate,
   AppSettings,
+  EntityId,
 } from './localStore';
 
-import type { Product, Purchase, Order, OrderItem, InvoiceTemplate, AppSettings } from './localStore';
+import type { Product, Purchase, Order, OrderItem, InvoiceTemplate, AppSettings, EntityId } from './localStore';
 
 const BASE = '/api';
 
@@ -35,7 +36,7 @@ export const productsStore = {
   async findByCode(code: string): Promise<Product | null> {
     return apiFetch<Product | null>(`/products/by-code/${encodeURIComponent(code)}`);
   },
-  async get(id: string): Promise<Product | null> {
+  async get(id: EntityId): Promise<Product | null> {
     const list = await this.list();
     return list.find(p => p.id === id) ?? null;
   },
@@ -44,7 +45,7 @@ export const productsStore = {
   ): Promise<Product> {
     return apiFetch<Product>('/products/upsert', { method: 'POST', ...json(input) });
   },
-  async updateStock(id: string, newStock: number): Promise<void> {
+  async updateStock(id: EntityId, newStock: number): Promise<void> {
     await apiFetch('/products/' + id + '/stock', { method: 'PATCH', ...json({ stock: newStock }) });
   },
   async count(): Promise<number> {
@@ -81,7 +82,7 @@ export const ordersStore = {
   async create(o: Omit<Order, 'id' | 'created_at'>): Promise<Order> {
     return apiFetch<Order>('/orders', { method: 'POST', ...json(o) });
   },
-  async setPaid(id: string, paid: boolean): Promise<void> {
+  async setPaid(id: EntityId, paid: boolean): Promise<void> {
     await apiFetch(`/orders/${id}/paid`, { method: 'PATCH', ...json({ paid }) });
   },
 };
@@ -91,7 +92,7 @@ export const orderItemsStore = {
   async list(): Promise<OrderItem[]> {
     return apiFetch<OrderItem[]>('/order-items');
   },
-  async forOrder(orderId: string): Promise<OrderItem[]> {
+  async forOrder(orderId: EntityId): Promise<OrderItem[]> {
     return apiFetch<OrderItem[]>(`/order-items/for-order/${orderId}`);
   },
   async addMany(items: Omit<OrderItem, 'id'>[]): Promise<OrderItem[]> {
@@ -107,13 +108,13 @@ export const invoiceTemplatesStore = {
   async create(t: Partial<InvoiceTemplate> & { name: string }): Promise<InvoiceTemplate> {
     return apiFetch<InvoiceTemplate>('/invoice-templates', { method: 'POST', ...json(t) });
   },
-  async update(id: string, patch: Partial<InvoiceTemplate>): Promise<void> {
+  async update(id: EntityId, patch: Partial<InvoiceTemplate>): Promise<void> {
     await apiFetch(`/invoice-templates/${id}`, { method: 'PUT', ...json(patch) });
   },
-  async remove(id: string): Promise<void> {
+  async remove(id: EntityId): Promise<void> {
     await apiFetch(`/invoice-templates/${id}`, { method: 'DELETE' });
   },
-  async setDefault(id: string): Promise<void> {
+  async setDefault(id: EntityId): Promise<void> {
     await apiFetch(`/invoice-templates/${id}/default`, { method: 'PATCH', ...json({}) });
   },
 };

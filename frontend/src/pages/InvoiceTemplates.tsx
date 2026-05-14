@@ -9,7 +9,7 @@ import { FileText, Plus, Trash2, Star, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { invoiceTemplatesStore, type InvoiceTemplate } from "@/lib/fileStore";
+import { invoiceTemplatesStore, type EntityId, type InvoiceTemplate } from "@/lib/fileStore";
 
 function Inner() {
   const [items, setItems] = useState<InvoiceTemplate[]>([]);
@@ -31,21 +31,21 @@ function Inner() {
     load();
   };
 
-  const setDefault = async (id: string) => {
+  const setDefault = async (id: EntityId) => {
     await invoiceTemplatesStore.setDefault(id);
     toast.success("Đã đặt làm mặc định");
     load();
   };
 
-  const remove = async (id: string) => {
+  const remove = async (id: EntityId) => {
     await invoiceTemplatesStore.remove(id);
     toast.success("Đã xoá");
     load();
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+      <div className="flex shrink-0 items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-semibold">Mẫu hoá đơn</h1>
           <p className="text-muted-foreground text-sm mt-1">Tạo và quản lý template hoá đơn xuất ra</p>
@@ -55,7 +55,7 @@ function Inner() {
         </Button>
       </div>
 
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid min-h-0 flex-1 auto-rows-max gap-3 overflow-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
         {items.length === 0 && (
           <Card className="col-span-full p-12 text-center text-muted-foreground">
             <FileText className="w-10 h-10 mx-auto mb-2 opacity-40" />

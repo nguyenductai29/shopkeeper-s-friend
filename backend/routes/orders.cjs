@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { uuid, now, saveDb, queryAll, run, boolRows } = require('../db.cjs');
+const { now, saveDb, queryAll, run, boolRows, lastInsertId } = require('../db.cjs');
 
 const router = express.Router();
 
@@ -22,7 +22,6 @@ router.get('/since/:iso', (req, res) => {
 router.post('/', (req, res) => {
   const b = req.body;
   const created = {
-    id: uuid(),
     customer_name: b.customer_name ?? null,
     customer_phone: b.customer_phone ?? null,
     customer_address: b.customer_address ?? null,
@@ -33,11 +32,12 @@ router.post('/', (req, res) => {
     created_at: now(),
   };
   run(
-    `INSERT INTO orders (id,customer_name,customer_phone,customer_address,total,cost_total,paid,note,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-    [created.id, created.customer_name, created.customer_phone, created.customer_address, created.total, created.cost_total, created.paid, created.note, created.created_at]
+    `INSERT INTO orders (customer_name,customer_phone,customer_address,total,cost_total,paid,note,created_at) VALUES (?,?,?,?,?,?,?,?)`,
+    [created.customer_name, created.customer_phone, created.customer_address, created.total, created.cost_total, created.paid, created.note, created.created_at]
   );
+  const id = lastInsertId();
   saveDb();
-  res.json({ ...created, paid: !!created.paid });
+  res.json({ id, ...created, paid: !!created.paid });
 });
 
 router.patch('/:id/paid', (req, res) => {

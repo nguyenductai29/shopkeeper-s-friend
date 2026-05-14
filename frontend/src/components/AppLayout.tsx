@@ -14,15 +14,15 @@ export default function AppLayout() {
   }, [])
 
   return (
-    <SidebarProvider>
-      <div className="min-h-screen flex w-full bg-background">
+    <SidebarProvider className="h-full min-h-0 overflow-hidden">
+      <div className="h-screen flex w-full overflow-hidden bg-background">
         <AppSidebar />
-        <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-14 flex items-center border-b bg-card/50 backdrop-blur sticky top-0 z-10 px-4 gap-3">
+        <div className="flex-1 flex h-full min-w-0 flex-col overflow-hidden">
+          <header className="h-14 shrink-0 flex items-center border-b bg-card/50 backdrop-blur px-4 gap-3">
             <SidebarTrigger />
             <div className="text-sm text-muted-foreground">{shopName}</div>
           </header>
-          <main className="flex-1 p-4 md:p-6 overflow-auto">
+          <main className="flex-1 min-h-0 overflow-hidden p-3 md:p-4">
             <Outlet />
           </main>
         </div>
