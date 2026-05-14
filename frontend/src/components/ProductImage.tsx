@@ -12,23 +12,33 @@ type ProductImageProps = {
 
 export function ProductImage({ src, alt = "", className, iconClassName }: ProductImageProps) {
   const resolvedSrc = imageProxyUrl(src);
-  const [failed, setFailed] = useState(false);
+  const directSrc = String(src || "").trim();
+  const sources = resolvedSrc && directSrc && resolvedSrc !== directSrc ? [resolvedSrc, directSrc] : [resolvedSrc];
+  const [sourceIndex, setSourceIndex] = useState(0);
 
   useEffect(() => {
-    setFailed(false);
+    setSourceIndex(0);
   }, [resolvedSrc]);
 
-  if (!resolvedSrc || failed) {
+  const activeSrc = sources[sourceIndex];
+
+  if (!activeSrc) {
     return <Package className={cn("h-5 w-5 text-muted-foreground/40", iconClassName)} />;
   }
 
   return (
     <img
-      src={resolvedSrc}
+      src={activeSrc}
       alt={alt}
       className={className}
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => {
+        if (sourceIndex < sources.length - 1) {
+          setSourceIndex((current) => current + 1);
+        } else {
+          setSourceIndex(sources.length);
+        }
+      }}
     />
   );
 }

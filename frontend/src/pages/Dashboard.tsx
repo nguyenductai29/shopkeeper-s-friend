@@ -14,17 +14,30 @@ export default function Dashboard() {
   const [unpaidCount, setUnpaidCount] = useState(0);
 
   useEffect(() => {
-    const since = subDays(new Date(), 29).toISOString();
-    (async () => {
+    let cancelled = false;
+
+    const loadDashboard = async () => {
+      const since = subDays(new Date(), 29).toISOString();
       const [recentOrders, count, unpaidCount] = await Promise.all([
         ordersStore.listSince(since),
         productsStore.count(),
         ordersStore.unpaidCount(),
       ]);
+      if (cancelled) return;
       setOrders(recentOrders);
       setProductCount(count);
       setUnpaidCount(unpaidCount);
-    })();
+    };
+
+    loadDashboard();
+    const intervalId = window.setInterval(loadDashboard, 5000);
+    window.addEventListener("focus", loadDashboard);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", loadDashboard);
+    };
   }, []);
 
   const totalRevenue = orders.reduce((s, o) => s + Number(o.total), 0);

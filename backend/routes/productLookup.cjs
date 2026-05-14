@@ -7,12 +7,32 @@ const router = express.Router();
 const USER_AGENT = "Shopkeeper's Friend/1.0 (local desktop app)";
 const LOOKUP_TIMEOUT_MS = 8000;
 const IMAGE_TIMEOUT_MS = 12000;
+const SHOPPING_SEARCH_TARGETS = [
+  { source: 'Amazon Japan', domain: 'amazon.co.jp', hostPattern: /(^|\.)amazon\.co\.jp$/ },
+  { source: 'Rakuten', domain: 'item.rakuten.co.jp', hostPattern: /(^|\.)rakuten\.co\.jp$/ },
+  { source: 'Yahoo Shopping', domain: 'shopping.yahoo.co.jp', hostPattern: /(^|\.)shopping\.yahoo\.co\.jp$/ },
+  { source: 'Yahoo Store', domain: 'store.shopping.yahoo.co.jp', hostPattern: /(^|\.)store\.shopping\.yahoo\.co\.jp$/ },
+  { source: 'Yodobashi', domain: 'yodobashi.com', hostPattern: /(^|\.)yodobashi\.com$/ },
+  { source: 'BicCamera', domain: 'biccamera.com', hostPattern: /(^|\.)biccamera\.com$/ },
+  { source: 'LOHACO', domain: 'lohaco.yahoo.co.jp', hostPattern: /(^|\.)lohaco\.yahoo\.co\.jp$/ },
+];
 
 function pickFirst(...values) {
   return values.find((value) => typeof value === 'string' && value.trim())?.trim() || null;
 }
 
-async function fetchJson(url) {
+function uniqueStrings(values) {
+  const seen = new Set();
+  return values
+    .map((value) => String(value || '').trim())
+    .filter((value) => {
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+}
+
+async function fetchJson(url, headers = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
   try {
@@ -20,6 +40,7 @@ async function fetchJson(url) {
       headers: {
         Accept: 'application/json',
         'User-Agent': USER_AGENT,
+        ...headers,
       },
       signal: controller.signal,
     });
@@ -39,6 +60,7 @@ async function fetchText(url) {
     const res = await fetch(url, {
       headers: {
         Accept: 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ja,en-US;q=0.8,vi;q=0.7',
         'User-Agent': USER_AGENT,
       },
       signal: controller.signal,
@@ -56,6 +78,8 @@ function decodeHtml(value) {
   if (!value) return null;
   return String(value)
     .replace(/<[^>]*>/g, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#([0-9]+);/g, (_match, code) => String.fromCodePoint(parseInt(code, 10)))
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
@@ -72,6 +96,14 @@ function absoluteUrl(value, baseUrl) {
     return new URL(value, baseUrl).toString();
   } catch {
     return value;
+  }
+}
+
+function hostname(value) {
+  try {
+    return new URL(value).hostname.replace(/^www\./, '');
+  } catch {
+    return null;
   }
 }
 
@@ -143,7 +175,7 @@ function isLikelyImageUrl(value) {
   return /^https?:\/\//i.test(raw) && !/sprite|logo|favicon|placeholder/i.test(raw);
 }
 
-function firstHtmlImage(html, baseUrl) {
+function htmlImageCandidates(html, baseUrl) {
   const candidates = [
     metaContent(html, 'og:image:secure_url'),
     metaContent(html, 'og:image'),
@@ -169,7 +201,11 @@ function firstHtmlImage(html, baseUrl) {
     candidates.push(attrs.src, attrs['data-src'], attrs['data-original'], srcsetFirst(attrs.srcset));
   }
 
-  return absoluteUrl(candidates.map((value) => absoluteUrl(value, baseUrl)).find(isLikelyImageUrl), baseUrl);
+  return uniqueStrings(candidates.map((value) => absoluteUrl(value, baseUrl)).filter(isLikelyImageUrl));
+}
+
+function firstHtmlImage(html, baseUrl) {
+  return htmlImageCandidates(html, baseUrl)[0] || null;
 }
 
 async function proxyImage(req, res) {
@@ -224,26 +260,82 @@ function normalizeUpcItemDbProduct(data) {
   };
 }
 
+function normalizeBarcodeFinderProduct(data) {
+  const product = data?.product || data;
+  const name = pickFirst(product?.title, product?.name, product?.description, product?.brand);
+  if (!name) return null;
+
+  return {
+    found: true,
+    source: 'BarcodeFinder',
+    name,
+    image_url: Array.isArray(product.images) ? pickFirst(...product.images) : pickFirst(product.image, product.image_url),
+  };
+}
+
+function cleanProductName(value) {
+  return String(value || '')
+    .replace(/\s*[|-]\s*(公式通販|DAISO.*|ダイソーネットストア.*|Daiso.*)$/i, '')
+    .replace(/\s*[|｜]\s*(Amazon\.co\.jp|楽天市場|Yahoo!ショッピング|ヨドバシ\.com|ビックカメラ\.com).*$/i, '')
+    .replace(/\s*[-|｜]\s*通販.*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 async function lookupProductPage(url, source) {
   const html = await fetchText(url);
   if (!html) return null;
   if (/404|not found|page not found|product-not-found/i.test(html.slice(0, 2000))) return null;
+  if (/captcha|robot check|automated access|アクセスが集中|ただいまアクセスしづらい/i.test(html.slice(0, 5000))) return null;
 
   const name = pickFirst(
     metaContent(html, 'og:title'),
     decodeHtml(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]),
     decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]),
   );
-  if (!name) return null;
+  const cleanName = cleanProductName(name);
+  if (!cleanName) return null;
 
   return {
     found: true,
     source,
-    name: name
-      .replace(/\s*[|-]\s*(公式通販|DAISO.*|ダイソーネットストア.*|Daiso.*)$/i, '')
-      .trim(),
+    name: cleanName,
     image_url: firstHtmlImage(html, url),
   };
+}
+
+function unwrapDuckDuckGoUrl(href) {
+  const decodedHref = decodeHtml(href);
+  try {
+    const url = new URL(decodedHref, 'https://duckduckgo.com');
+    const wrapped = url.searchParams.get('uddg');
+    return wrapped ? decodeURIComponent(wrapped) : url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function extractDuckDuckGoResultUrls(html, code, options = {}) {
+  const urls = [];
+  const regex = /<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  const matches = [];
+  while ((match = regex.exec(html))) matches.push(match);
+
+  for (let index = 0; index < matches.length; index += 1) {
+    const current = matches[index];
+    const next = matches[index + 1];
+    const url = unwrapDuckDuckGoUrl(current[1]);
+    if (!url) continue;
+    const host = hostname(url);
+    if (options.hostPattern && (!host || !options.hostPattern.test(host))) continue;
+    const block = html.slice(current.index, next?.index || Math.min(html.length, current.index + 2500));
+    const text = decodeHtml(block) || '';
+    if (!url.includes(code) && !text.includes(code)) continue;
+    if (/\.(pdf|zip|jpg|jpeg|png|webp)(\?|#|$)/i.test(url)) continue;
+    urls.push(url);
+  }
+  return uniqueStrings(urls).slice(0, options.limit || 6);
 }
 
 async function lookupDaiso(code) {
@@ -259,6 +351,59 @@ async function lookupDaiso(code) {
   }
 
   return null;
+}
+
+async function lookupBarcodeFinder(code) {
+  const apiKey = process.env.BARCODEFINDER_API_KEY;
+  if (!apiKey) return null;
+  const data = await fetchJson(`https://api.barcodefinder.info/v1/product/${encodeURIComponent(code)}`, {
+    'x-barcode-key': apiKey,
+  });
+  return normalizeBarcodeFinderProduct(data);
+}
+
+async function lookupDuckDuckGo(code) {
+  const html = await fetchText(`https://duckduckgo.com/html/?q=${encodeURIComponent(`"${code}" product`)}`);
+  if (!html) return null;
+
+  for (const url of extractDuckDuckGoResultUrls(html, code)) {
+    const result = await lookupProductPage(url, hostname(url) || 'Web search');
+    if (result?.found) return result;
+  }
+
+  return null;
+}
+
+async function lookupShoppingSearch(code) {
+  const searches = await Promise.all(
+    SHOPPING_SEARCH_TARGETS.map(async (target) => {
+      const query = `"${code}" site:${target.domain}`;
+      const html = await fetchText(`https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`);
+      if (!html) return [];
+      return extractDuckDuckGoResultUrls(html, code, {
+        hostPattern: target.hostPattern,
+        limit: 3,
+      }).map((url) => ({ url, source: target.source }));
+    }),
+  );
+
+  const candidates = [];
+  const seen = new Set();
+  for (const result of searches.flat()) {
+    if (seen.has(result.url)) continue;
+    seen.add(result.url);
+    candidates.push(result);
+  }
+
+  let fallback = null;
+  for (const candidate of candidates.slice(0, 12)) {
+    const result = await lookupProductPage(candidate.url, candidate.source);
+    if (!result?.found) continue;
+    if (result.image_url) return result;
+    fallback ||= result;
+  }
+
+  return fallback;
 }
 
 async function lookupOpenFacts(baseUrl, code, source) {
@@ -291,14 +436,24 @@ router.get('/:code', async (req, res) => {
   const providers = [
     () => lookupOpenFacts('https://world.openfoodfacts.org', code, 'Open Food Facts'),
     () => lookupOpenFacts('https://world.openproductsfacts.org', code, 'Open Products Facts'),
+    () => lookupOpenFacts('https://world.openbeautyfacts.org', code, 'Open Beauty Facts'),
+    () => lookupOpenFacts('https://world.openpetfoodfacts.org', code, 'Open Pet Food Facts'),
     () => lookupUpcItemDb(code),
+    () => lookupBarcodeFinder(code),
     () => lookupDaiso(code),
+    () => lookupShoppingSearch(code),
+    () => lookupDuckDuckGo(code),
   ];
 
+  let fallback = null;
   for (const provider of providers) {
-    const result = await provider();
-    if (result?.found) return res.json({ code, ...result });
+    const result = await provider().catch(() => null);
+    if (!result?.found) continue;
+    if (result.image_url) return res.json({ code, ...result });
+    fallback ||= result;
   }
+
+  if (fallback) return res.json({ code, ...fallback });
 
   res.json({ code, found: false });
 });

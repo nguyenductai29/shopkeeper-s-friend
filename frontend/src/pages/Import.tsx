@@ -17,6 +17,7 @@ import {
   Loader2,
   Package,
   Pencil,
+  RefreshCw,
   Save,
   ScanLine,
   Trash2,
@@ -63,6 +64,7 @@ function ImportPageInner() {
   const [rows, setRows] = useState<Row[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [saving, setSaving] = useState(false);
+  const [backfillingImages, setBackfillingImages] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<{
     id: EntityId;
     cost_price: number;
@@ -114,6 +116,7 @@ function ImportPageInner() {
     if (!code) return;
     const key = nextDraftKey();
     const existingProduct = await productsStore.findByCode(code);
+    const shouldLookupOnline = !existingProduct || !existingProduct.image_url;
     setRows((r) => [
       ...r,
       {
@@ -125,34 +128,38 @@ function ImportPageInner() {
         cost_price: existingProduct?.cost_price || 0,
         sale_price: existingProduct?.sale_price || 0,
         quantity: 1,
-        lookup_status: existingProduct ? "found" : "loading",
-        lookup_message: existingProduct ? "Đã có trong kho" : "Đang tìm online...",
+        lookup_status: shouldLookupOnline ? "loading" : "found",
+        lookup_message: existingProduct
+          ? (existingProduct.image_url ? "Đã có trong kho" : "Đang tìm ảnh online...")
+          : "Đang tìm online...",
       },
     ]);
     setScan("");
     scanRef.current?.focus();
 
-    if (existingProduct) return;
+    if (!shouldLookupOnline) return;
 
     try {
       const result = await productLookupStore.byBarcode(code);
       if (result.found) {
         updateRow(key, {
-          name: result.name || "",
-          image_url: result.image_url || "",
+          name: existingProduct?.name || result.name || "",
+          image_url: result.image_url || existingProduct?.image_url || "",
           lookup_status: "found",
-          lookup_message: result.source ? `Tìm thấy: ${result.source}` : "Tìm thấy online",
+          lookup_message: result.image_url
+            ? (result.source ? `Tìm thấy ảnh: ${result.source}` : "Tìm thấy ảnh online")
+            : (result.source ? `Tìm thấy tên: ${result.source}` : "Tìm thấy tên, chưa có ảnh"),
         });
       } else {
         updateRow(key, {
-          lookup_status: "not_found",
-          lookup_message: "Không tìm thấy, nhập tay tên SP",
+          lookup_status: existingProduct ? "found" : "not_found",
+          lookup_message: existingProduct ? "Đã có trong kho, chưa tìm thấy ảnh" : "Không tìm thấy, nhập tay tên SP",
         });
       }
     } catch {
       updateRow(key, {
-        lookup_status: "error",
-        lookup_message: "Lỗi tìm online, nhập tay",
+        lookup_status: existingProduct ? "found" : "error",
+        lookup_message: existingProduct ? "Đã có trong kho, lỗi tìm ảnh" : "Lỗi tìm online, nhập tay",
       });
     }
   };
@@ -254,6 +261,45 @@ function ImportPageInner() {
     });
   };
 
+  const backfillMissingImages = async () => {
+    setBackfillingImages(true);
+    try {
+      const products = await productsStore.list();
+      const targets = products.filter((product) => !product.image_url);
+      if (targets.length === 0) {
+        toast.success("Không còn sản phẩm thiếu ảnh");
+        return;
+      }
+
+      let updated = 0;
+      for (const product of targets) {
+        const result = await productLookupStore.byBarcode(product.code);
+        if (!result.image_url) continue;
+
+        await productsStore.upsertByCode({
+          code: product.code,
+          name: product.name || result.name || product.code,
+          image_url: result.image_url,
+          cost_price: product.cost_price,
+          sale_price: product.sale_price,
+          stock: 0,
+          addStock: 0,
+        });
+        updated += 1;
+      }
+
+      if (updated > 0) {
+        toast.success(`Đã cập nhật ảnh cho ${updated}/${targets.length} sản phẩm`);
+      } else {
+        toast.error("Chưa tìm thấy ảnh mới cho các sản phẩm thiếu ảnh");
+      }
+    } catch {
+      toast.error("Lỗi khi cập nhật ảnh thiếu");
+    } finally {
+      setBackfillingImages(false);
+    }
+  };
+
   const startEditPurchase = (purchase: Purchase) => {
     setEditingPurchase({
       id: purchase.id,
@@ -296,9 +342,15 @@ function ImportPageInner() {
           <h1 className="text-2xl md:text-3xl font-semibold">Nhập hàng</h1>
           <p className="text-muted-foreground text-sm mt-1">Quét hoặc nhập mã, sau đó điền thông tin & lưu</p>
         </div>
-        <Button variant="outline" onClick={exportPurchases} disabled={purchases.length === 0}>
-          <FileSpreadsheet className="w-4 h-4 mr-2" /> Xuất Excel
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={backfillMissingImages} disabled={backfillingImages}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${backfillingImages ? "animate-spin" : ""}`} />
+            {backfillingImages ? "Đang tải ảnh..." : "Tải ảnh thiếu"}
+          </Button>
+          <Button variant="outline" onClick={exportPurchases} disabled={purchases.length === 0}>
+            <FileSpreadsheet className="w-4 h-4 mr-2" /> Xuất Excel
+          </Button>
+        </div>
       </div>
 
       <Card className="shrink-0 p-3 shadow-elegant">
