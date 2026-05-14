@@ -10,19 +10,26 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Check,
   ChevronLeft,
   ChevronRight,
   FileSpreadsheet,
+  Loader2,
   Package,
+  Pencil,
   Save,
   ScanLine,
   Trash2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatVND } from "@/lib/format";
 import { AdminGate } from "@/components/AdminGate";
-import { productsStore, purchasesStore, type EntityId, type Purchase } from "@/lib/fileStore";
+import { ProductImage } from "@/components/ProductImage";
+import { productLookupStore, productsStore, purchasesStore, type EntityId, type Purchase } from "@/lib/fileStore";
 import { exportRowsToExcel } from "@/lib/exportExcel";
+
+type LookupStatus = "idle" | "loading" | "found" | "not_found" | "error";
 
 type Row = {
   key: string;
@@ -33,6 +40,8 @@ type Row = {
   cost_price: number;
   sale_price: number;
   quantity: number;
+  lookup_status: LookupStatus;
+  lookup_message: string;
 };
 
 type SortKey = "id" | "created_at" | "product_code" | "product_name" | "cost_price" | "sale_price" | "quantity" | "total";
@@ -54,6 +63,12 @@ function ImportPageInner() {
   const [rows, setRows] = useState<Row[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [saving, setSaving] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState<{
+    id: EntityId;
+    cost_price: number;
+    sale_price: number;
+    quantity: number;
+  } | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
     key: "created_at",
     direction: "desc",
@@ -89,26 +104,57 @@ function ImportPageInner() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  const updateRow = (key: string, patch: Partial<Row>) => {
+    setRows((currentRows) => currentRows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  };
+
   const handleScan = async (e: FormEvent) => {
     e.preventDefault();
     const code = scan.trim();
     if (!code) return;
-    const p = await productsStore.findByCode(code);
+    const key = nextDraftKey();
+    const existingProduct = await productsStore.findByCode(code);
     setRows((r) => [
       ...r,
       {
-        key: nextDraftKey(),
-        product_id: p?.id ?? null,
+        key,
+        product_id: existingProduct?.id ?? null,
         code,
-        name: p?.name || "",
-        image_url: p?.image_url || "",
-        cost_price: p?.cost_price || 0,
-        sale_price: p?.sale_price || 0,
+        name: existingProduct?.name || "",
+        image_url: existingProduct?.image_url || "",
+        cost_price: existingProduct?.cost_price || 0,
+        sale_price: existingProduct?.sale_price || 0,
         quantity: 1,
+        lookup_status: existingProduct ? "found" : "loading",
+        lookup_message: existingProduct ? "Đã có trong kho" : "Đang tìm online...",
       },
     ]);
     setScan("");
     scanRef.current?.focus();
+
+    if (existingProduct) return;
+
+    try {
+      const result = await productLookupStore.byBarcode(code);
+      if (result.found) {
+        updateRow(key, {
+          name: result.name || "",
+          image_url: result.image_url || "",
+          lookup_status: "found",
+          lookup_message: result.source ? `Tìm thấy: ${result.source}` : "Tìm thấy online",
+        });
+      } else {
+        updateRow(key, {
+          lookup_status: "not_found",
+          lookup_message: "Không tìm thấy, nhập tay tên SP",
+        });
+      }
+    } catch {
+      updateRow(key, {
+        lookup_status: "error",
+        lookup_message: "Lỗi tìm online, nhập tay",
+      });
+    }
   };
 
   const update = (key: string, field: keyof Row, value: any) =>
@@ -152,6 +198,7 @@ function ImportPageInner() {
 
   const save = async () => {
     if (rows.length === 0) return toast.error("Chưa có hàng nào");
+    if (rows.some((row) => row.lookup_status === "loading")) return toast.error("Đang tìm thông tin sản phẩm, vui lòng chờ");
     for (const row of rows) {
       if (!row.code || !row.name) return toast.error("Cần điền đủ mã & tên sản phẩm");
     }
@@ -207,6 +254,38 @@ function ImportPageInner() {
     });
   };
 
+  const startEditPurchase = (purchase: Purchase) => {
+    setEditingPurchase({
+      id: purchase.id,
+      cost_price: Number(purchase.cost_price || 0),
+      sale_price: Number(purchase.sale_price || 0),
+      quantity: Number(purchase.quantity || 0),
+    });
+  };
+
+  const updateEditingPurchase = (field: "cost_price" | "sale_price" | "quantity", value: number) => {
+    setEditingPurchase((current) => (current ? { ...current, [field]: value } : current));
+  };
+
+  const saveEditingPurchase = async () => {
+    if (!editingPurchase) return;
+    if (editingPurchase.quantity <= 0) return toast.error("Số lượng phải lớn hơn 0");
+    if (editingPurchase.cost_price < 0 || editingPurchase.sale_price < 0) return toast.error("Giá không được âm");
+
+    try {
+      await purchasesStore.update(editingPurchase.id, {
+        cost_price: editingPurchase.cost_price,
+        sale_price: editingPurchase.sale_price,
+        quantity: editingPurchase.quantity,
+      });
+      toast.success("Đã cập nhật lịch sử nhập hàng");
+      setEditingPurchase(null);
+      await loadPurchases();
+    } catch {
+      toast.error("Lỗi khi cập nhật lịch sử nhập hàng");
+    }
+  };
+
   const rangeStart = sortedPurchases.length === 0 ? 0 : pageStart + 1;
   const rangeEnd = Math.min(pageStart + visiblePurchases.length, sortedPurchases.length);
 
@@ -229,13 +308,13 @@ function ImportPageInner() {
             <Input
               ref={scanRef}
               autoFocus
-              placeholder="Quét hoặc nhập mã sản phẩm..."
+              placeholder="Nhập mã vạch rồi Enter để tìm sản phẩm..."
               className="pl-9 h-11"
               value={scan}
               onChange={(e) => setScan(e.target.value)}
             />
           </div>
-          <Button type="submit" size="lg">Thêm dòng</Button>
+          <Button type="submit" size="lg">Tìm & thêm</Button>
         </form>
       </Card>
 
@@ -245,17 +324,17 @@ function ImportPageInner() {
             <div className="font-semibold">Phiếu nhập đang soạn</div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="min-w-[980px]">
+            <Table className="min-w-[900px]">
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <TableHead className="w-16">Ảnh</TableHead>
                   <TableHead className="w-24">Mã</TableHead>
-                  <TableHead className="min-w-[160px]">Tên SP</TableHead>
-                  <TableHead className="w-48">URL ảnh</TableHead>
+                  <TableHead className="min-w-[220px]">Tên SP</TableHead>
                   <TableHead className="w-32">Giá nhập</TableHead>
                   <TableHead className="w-32">Giá bán</TableHead>
                   <TableHead className="w-24">SL</TableHead>
                   <TableHead className="w-32 text-right">Thành tiền</TableHead>
+                  <TableHead className="w-44">Trạng thái</TableHead>
                   <TableHead className="w-12"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -264,7 +343,7 @@ function ImportPageInner() {
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
                       <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                      Chưa có hàng nhập. Quét mã ở phía trên.
+                      Chưa có hàng nhập. Nhập mã vạch ở phía trên.
                     </TableCell>
                   </TableRow>
                 )}
@@ -272,20 +351,29 @@ function ImportPageInner() {
                   <TableRow key={row.key}>
                     <TableCell className="p-2">
                       <div className="w-10 h-10 rounded bg-muted overflow-hidden flex items-center justify-center">
-                        {row.image_url ? (
-                          <img src={row.image_url} className="w-full h-full object-cover" alt="" />
+                        {row.lookup_status === "loading" ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                        ) : row.image_url ? (
+                          <ProductImage src={row.image_url} alt={row.name} className="w-full h-full object-cover" />
                         ) : (
                           <Package className="w-4 h-4 text-muted-foreground/40" />
                         )}
                       </div>
                     </TableCell>
                     <TableCell className="p-2"><Input value={row.code} onChange={(e) => update(row.key, "code", e.target.value)} className="h-9" /></TableCell>
-                    <TableCell className="p-2"><Input value={row.name} onChange={(e) => update(row.key, "name", e.target.value)} className="h-9" /></TableCell>
-                    <TableCell className="p-2"><Input value={row.image_url} onChange={(e) => update(row.key, "image_url", e.target.value)} className="h-9" placeholder="https://..." /></TableCell>
+                    <TableCell className="p-2"><Input value={row.name} onChange={(e) => update(row.key, "name", e.target.value)} className="h-9" placeholder="Tên sản phẩm" /></TableCell>
                     <TableCell className="p-2"><Input type="number" value={row.cost_price} onChange={(e) => update(row.key, "cost_price", Number(e.target.value))} className="h-9" /></TableCell>
                     <TableCell className="p-2"><Input type="number" value={row.sale_price} onChange={(e) => update(row.key, "sale_price", Number(e.target.value))} className="h-9" /></TableCell>
                     <TableCell className="p-2"><Input type="number" value={row.quantity} onChange={(e) => update(row.key, "quantity", Number(e.target.value))} className="h-9" /></TableCell>
                     <TableCell className="p-2 text-right font-medium">{formatVND(row.cost_price * row.quantity)}</TableCell>
+                    <TableCell className="p-2">
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        {row.lookup_status === "loading" && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+                        <span className={row.lookup_status === "error" ? "text-destructive" : ""}>
+                          {row.lookup_message}
+                        </span>
+                      </div>
+                    </TableCell>
                     <TableCell className="p-2">
                       <Button size="icon" variant="ghost" onClick={() => remove(row.key)} className="text-destructive">
                         <Trash2 className="w-4 h-4" />
@@ -315,7 +403,7 @@ function ImportPageInner() {
             <div className="text-sm text-muted-foreground">{purchases.length} dòng</div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="min-w-[920px]">
+            <Table className="min-w-[1040px]">
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <SortableHead sortKey="id" className="w-20">ID</SortableHead>
@@ -326,12 +414,13 @@ function ImportPageInner() {
                   <SortableHead sortKey="sale_price" className="w-32 text-right">Giá bán</SortableHead>
                   <SortableHead sortKey="quantity" className="w-24 text-right">SL</SortableHead>
                   <SortableHead sortKey="total" className="w-36 text-right">Thành tiền</SortableHead>
+                  <TableHead className="w-28 text-right">Sửa</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {visiblePurchases.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
                       <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
                       Chưa có lịch sử nhập hàng.
                     </TableCell>
@@ -343,10 +432,62 @@ function ImportPageInner() {
                     <TableCell>{formatDateTime(purchase.created_at)}</TableCell>
                     <TableCell>{purchase.product_code}</TableCell>
                     <TableCell className="font-medium">{purchase.product_name}</TableCell>
-                    <TableCell className="text-right">{formatVND(purchase.cost_price)}</TableCell>
-                    <TableCell className="text-right">{formatVND(purchase.sale_price)}</TableCell>
-                    <TableCell className="text-right">{purchase.quantity}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatVND(purchase.total)}</TableCell>
+                    {editingPurchase?.id === purchase.id ? (
+                      <>
+                        <TableCell className="p-2">
+                          <Input
+                            type="number"
+                            min={0}
+                            value={editingPurchase.cost_price}
+                            onChange={(e) => updateEditingPurchase("cost_price", Number(e.target.value))}
+                            className="h-9 text-right"
+                          />
+                        </TableCell>
+                        <TableCell className="p-2">
+                          <Input
+                            type="number"
+                            min={0}
+                            value={editingPurchase.sale_price}
+                            onChange={(e) => updateEditingPurchase("sale_price", Number(e.target.value))}
+                            className="h-9 text-right"
+                          />
+                        </TableCell>
+                        <TableCell className="p-2">
+                          <Input
+                            type="number"
+                            min={1}
+                            value={editingPurchase.quantity}
+                            onChange={(e) => updateEditingPurchase("quantity", Number(e.target.value))}
+                            className="h-9 text-right"
+                          />
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">
+                          {formatVND(editingPurchase.cost_price * editingPurchase.quantity)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button size="icon" variant="ghost" onClick={saveEditingPurchase}>
+                              <Check className="h-4 w-4 text-primary" />
+                            </Button>
+                            <Button size="icon" variant="ghost" onClick={() => setEditingPurchase(null)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </>
+                    ) : (
+                      <>
+                        <TableCell className="text-right">{formatVND(purchase.cost_price)}</TableCell>
+                        <TableCell className="text-right">{formatVND(purchase.sale_price)}</TableCell>
+                        <TableCell className="text-right">{purchase.quantity}</TableCell>
+                        <TableCell className="text-right font-semibold">{formatVND(purchase.total)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button size="icon" variant="ghost" onClick={() => startEditPurchase(purchase)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>

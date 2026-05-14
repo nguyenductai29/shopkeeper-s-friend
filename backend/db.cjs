@@ -32,6 +32,7 @@ const DEFAULT_SETTINGS = {
   id: 1,
   shop_name: null,
   currency: 'VND',
+  jpy_to_vnd_rate: 170,
   notify_on_low_stock: false,
   notify_on_new_order: false,
   notify_discord_webhook: null,
@@ -90,6 +91,16 @@ function isPositiveIntegerId(value) {
 function hasIntegerPrimaryId(tableName) {
   const idColumn = queryAll(`PRAGMA table_info(${tableName})`).find((column) => column.name === 'id');
   return !!idColumn && String(idColumn.type || '').toUpperCase().includes('INT');
+}
+
+function hasColumn(tableName, columnName) {
+  return queryAll(`PRAGMA table_info(${tableName})`).some((column) => column.name === columnName);
+}
+
+function ensureColumn(tableName, columnName, definition) {
+  if (!hasColumn(tableName, columnName)) {
+    run(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
 }
 
 function mappedNullableId(map, value) {
@@ -337,6 +348,7 @@ function migrateSettingsAutoIncrementId() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         shop_name TEXT,
         currency TEXT NOT NULL DEFAULT 'VND',
+        jpy_to_vnd_rate REAL NOT NULL DEFAULT 170,
         notify_on_low_stock INTEGER NOT NULL DEFAULT 0,
         notify_on_new_order INTEGER NOT NULL DEFAULT 0,
         notify_discord_webhook TEXT,
@@ -354,6 +366,7 @@ function migrateSettingsAutoIncrementId() {
         [
           'shop_name',
           'currency',
+          'jpy_to_vnd_rate',
           'notify_on_low_stock',
           'notify_on_new_order',
           'notify_discord_webhook',
@@ -364,6 +377,7 @@ function migrateSettingsAutoIncrementId() {
         [
           setting.shop_name ?? null,
           setting.currency || 'VND',
+          setting.jpy_to_vnd_rate ?? DEFAULT_SETTINGS.jpy_to_vnd_rate,
           setting.notify_on_low_stock ? 1 : 0,
           setting.notify_on_new_order ? 1 : 0,
           setting.notify_discord_webhook ?? null,
@@ -477,6 +491,7 @@ async function init() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       shop_name TEXT,
       currency TEXT NOT NULL DEFAULT 'VND',
+      jpy_to_vnd_rate REAL NOT NULL DEFAULT 170,
       notify_on_low_stock INTEGER NOT NULL DEFAULT 0,
       notify_on_new_order INTEGER NOT NULL DEFAULT 0,
       notify_discord_webhook TEXT,
@@ -488,11 +503,12 @@ async function init() {
 
   migrateAutoIncrementIds();
   migrateSettingsAutoIncrementId();
+  ensureColumn('settings', 'jpy_to_vnd_rate', 'REAL NOT NULL DEFAULT 170');
 
   const existing = queryGet(`SELECT id FROM settings ORDER BY id LIMIT 1`);
   if (!existing) {
-    run(`INSERT INTO settings (currency, notify_on_low_stock, notify_on_new_order, updated_at)
-         VALUES ('VND', 0, 0, ?)`, [now()]);
+    run(`INSERT INTO settings (currency, jpy_to_vnd_rate, notify_on_low_stock, notify_on_new_order, updated_at)
+         VALUES ('VND', ?, 0, 0, ?)`, [DEFAULT_SETTINGS.jpy_to_vnd_rate, now()]);
   }
 
   saveDb();

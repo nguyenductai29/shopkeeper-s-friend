@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   ShoppingCart,
   PackagePlus,
   FileText,
+  ReceiptText,
   Users,
   Settings,
   Lock,
@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useAdmin } from "@/contexts/AdminContext";
 import { Button } from "@/components/ui/button";
-import { settingsStore } from "@/lib/fileStore";
+import { useShopName } from "@/hooks/useShopName";
 
 const mainItems = [
   { title: "Bảng điều khiển", url: "/", icon: LayoutDashboard },
@@ -32,6 +32,7 @@ const mainItems = [
 ];
 
 const adminItems = [
+  { title: "Quản lý bán hàng", url: "/sales", icon: ReceiptText },
   { title: "Nhập hàng", url: "/import", icon: PackagePlus },
   { title: "Mẫu hoá đơn", url: "/invoice-templates", icon: FileText },
   { title: "Công nợ", url: "/debts", icon: Users },
@@ -43,13 +44,7 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const { pathname } = useLocation();
   const { isAdmin, lock } = useAdmin();
-  const [shopName, setShopName] = useState("ShopFlow");
-
-  useEffect(() => {
-    settingsStore.get().then((s) => {
-      if (s.shop_name) setShopName(s.shop_name);
-    });
-  }, []);
+  const shopName = useShopName();
 
   const isActive = (path: string) => pathname === path;
 

@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { now, saveDb, queryAll, run, lastInsertId } = require('../db.cjs');
+const { now, saveDb, queryAll, queryGet, run, lastInsertId } = require('../db.cjs');
 
 const router = express.Router();
 
@@ -28,6 +28,32 @@ router.post('/', (req, res) => {
   const id = lastInsertId();
   saveDb();
   res.json({ id, ...created });
+});
+
+router.put('/:id', (req, res) => {
+  const existing = queryGet(`SELECT * FROM purchases WHERE id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'purchase_not_found' });
+
+  const nextCostPrice = Math.max(0, Number(req.body.cost_price ?? existing.cost_price) || 0);
+  const nextSalePrice = Math.max(0, Number(req.body.sale_price ?? existing.sale_price) || 0);
+  const nextQuantity = Math.max(0, Number(req.body.quantity ?? existing.quantity) || 0);
+  const nextTotal = nextCostPrice * nextQuantity;
+
+  run(
+    `UPDATE purchases SET cost_price=?, sale_price=?, quantity=?, total=? WHERE id=?`,
+    [nextCostPrice, nextSalePrice, nextQuantity, nextTotal, req.params.id],
+  );
+
+  const stockDelta = nextQuantity - Number(existing.quantity || 0);
+  if (existing.product_id !== null && existing.product_id !== undefined) {
+    run(
+      `UPDATE products SET cost_price=?, sale_price=?, stock=MAX(0, stock + ?), updated_at=? WHERE id=?`,
+      [nextCostPrice, nextSalePrice, stockDelta, now(), existing.product_id],
+    );
+  }
+
+  saveDb();
+  res.json(queryGet(`SELECT * FROM purchases WHERE id=?`, [req.params.id]));
 });
 
 module.exports = router;

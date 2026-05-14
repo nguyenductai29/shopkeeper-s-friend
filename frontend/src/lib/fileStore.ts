@@ -14,6 +14,29 @@ export type {
 import type { Product, Purchase, Order, OrderItem, InvoiceTemplate, AppSettings, EntityId } from './localStore';
 
 const BASE = '/api';
+export const SETTINGS_UPDATED_EVENT = 'shopkeeper:settings-updated';
+
+export type ProductLookupResult = {
+  code: string;
+  found: boolean;
+  name?: string | null;
+  image_url?: string | null;
+  source?: string | null;
+};
+
+export type NotificationSendResult = {
+  channel: 'discord' | 'email' | 'facebook';
+  sent?: boolean;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+};
+
+export type NotificationTestResult = {
+  ok: boolean;
+  results: NotificationSendResult[];
+  error?: string;
+};
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options);
@@ -26,6 +49,20 @@ function json(body: unknown): RequestInit {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   };
+}
+
+function emitSettingsUpdated(settings: AppSettings) {
+  window.dispatchEvent(new CustomEvent<AppSettings>(SETTINGS_UPDATED_EVENT, { detail: settings }));
+}
+
+export function imageProxyUrl(url: string | null | undefined): string {
+  const value = String(url || '').trim();
+  if (!value) return '';
+  if (value.startsWith(`${BASE}/product-lookup/image`)) return value;
+  if (/^https?:\/\//i.test(value)) {
+    return `${BASE}/product-lookup/image?url=${encodeURIComponent(value)}`;
+  }
+  return value;
 }
 
 // ===== Products =====
@@ -54,6 +91,20 @@ export const productsStore = {
   },
 };
 
+// ===== Online product lookup =====
+export const productLookupStore = {
+  async byBarcode(code: string): Promise<ProductLookupResult> {
+    return apiFetch<ProductLookupResult>(`/product-lookup/${encodeURIComponent(code)}`);
+  },
+};
+
+// ===== Notifications =====
+export const notificationStore = {
+  async test(): Promise<NotificationTestResult> {
+    return apiFetch<NotificationTestResult>('/notifications/test', { method: 'POST' });
+  },
+};
+
 // ===== Purchases =====
 export const purchasesStore = {
   async list(): Promise<Purchase[]> {
@@ -61,6 +112,9 @@ export const purchasesStore = {
   },
   async add(p: Omit<Purchase, 'id' | 'created_at'>): Promise<Purchase> {
     return apiFetch<Purchase>('/purchases', { method: 'POST', ...json(p) });
+  },
+  async update(id: EntityId, patch: Partial<Pick<Purchase, 'cost_price' | 'sale_price' | 'quantity'>>): Promise<Purchase> {
+    return apiFetch<Purchase>(`/purchases/${id}`, { method: 'PUT', ...json(patch) });
   },
 };
 
@@ -125,6 +179,8 @@ export const settingsStore = {
     return apiFetch<AppSettings>('/settings');
   },
   async save(s: AppSettings): Promise<AppSettings> {
-    return apiFetch<AppSettings>('/settings', { method: 'PUT', ...json(s) });
+    const saved = await apiFetch<AppSettings>('/settings', { method: 'PUT', ...json(s) });
+    emitSettingsUpdated(saved);
+    return saved;
   },
 };

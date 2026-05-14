@@ -2,6 +2,7 @@
 
 const express = require('express');
 const { now, saveDb, queryAll, queryGet, run, lastInsertId } = require('../db.cjs');
+const { LOW_STOCK_THRESHOLD, notifyLowStock } = require('../notifications.cjs');
 
 const router = express.Router();
 
@@ -56,11 +57,24 @@ router.post('/upsert', (req, res) => {
 
 router.patch('/:id/stock', (req, res) => {
   const { stock } = req.body;
+  const updatedAt = now();
+  const previous = queryGet(`SELECT * FROM products WHERE id=?`, [req.params.id]);
+  const parsedStock = Number(stock);
+  const nextStock = Number.isFinite(parsedStock) ? Math.max(0, parsedStock) : 0;
   run(
     `UPDATE products SET stock=?, updated_at=? WHERE id=?`,
-    [Math.max(0, Number(stock)), now(), req.params.id]
+    [nextStock, updatedAt, req.params.id]
   );
   saveDb();
+  const product = queryGet(`SELECT * FROM products WHERE id=?`, [req.params.id]);
+  if (
+    previous
+    && product
+    && Number(previous.stock) > LOW_STOCK_THRESHOLD
+    && Number(product.stock) <= LOW_STOCK_THRESHOLD
+  ) {
+    notifyLowStock(product).catch((err) => console.error('[notify] Lỗi gửi thông báo tồn kho:', err));
+  }
   res.json({ ok: true });
 });
 

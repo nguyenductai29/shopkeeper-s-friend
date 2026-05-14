@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { formatVND } from "@/lib/format";
 import { Search, ScanLine, Trash2, Plus, Minus, ShoppingCart, Package } from "lucide-react";
 import { toast } from "sonner";
+import { ProductImage } from "@/components/ProductImage";
 import { productsStore, ordersStore, orderItemsStore, type EntityId, type Product } from "@/lib/fileStore";
 
 type CartItem = Product & { qty: number };
@@ -135,7 +136,7 @@ export default function POS() {
               >
                 <div className="aspect-square bg-muted rounded-md overflow-hidden mb-2 flex items-center justify-center">
                   {p.image_url ? (
-                    <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                    <ProductImage src={p.image_url} alt={p.name} className="w-full h-full object-cover" iconClassName="w-8 h-8" />
                   ) : (
                     <Package className="w-8 h-8 text-muted-foreground/40" />
                   )}

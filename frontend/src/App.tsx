@@ -7,6 +7,7 @@ import { AdminProvider } from "@/contexts/AdminContext";
 import AppLayout from "@/components/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import POS from "./pages/POS";
+import Sales from "./pages/Sales";
 import ImportPage from "./pages/Import";
 import InvoiceTemplates from "./pages/InvoiceTemplates";
 import Debts from "./pages/Debts";
@@ -26,6 +27,7 @@ const App = () => (
             <Route element={<AppLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/pos" element={<POS />} />
+              <Route path="/sales" element={<Sales />} />
               <Route path="/import" element={<ImportPage />} />
               <Route path="/invoice-templates" element={<InvoiceTemplates />} />
               <Route path="/debts" element={<Debts />} />

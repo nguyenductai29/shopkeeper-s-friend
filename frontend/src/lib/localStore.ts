@@ -68,6 +68,7 @@ export type AppSettings = {
   id: EntityId;
   shop_name: string | null;
   currency: string;
+  jpy_to_vnd_rate: number;
   notify_on_low_stock: boolean;
   notify_on_new_order: boolean;
   notify_discord_webhook: string | null;
@@ -286,6 +287,30 @@ export const purchasesStore = {
     write(KEYS.purchases, list);
     return created;
   },
+  update(id: EntityId, patch: Partial<Pick<Purchase, "cost_price" | "sale_price" | "quantity">>): Purchase | undefined {
+    const list = this.list();
+    const purchase = list.find((item) => item.id === id);
+    if (!purchase) return undefined;
+
+    const previousQuantity = Number(purchase.quantity || 0);
+    purchase.cost_price = Math.max(0, Number(patch.cost_price ?? purchase.cost_price) || 0);
+    purchase.sale_price = Math.max(0, Number(patch.sale_price ?? purchase.sale_price) || 0);
+    purchase.quantity = Math.max(0, Number(patch.quantity ?? purchase.quantity) || 0);
+    purchase.total = purchase.cost_price * purchase.quantity;
+    write(KEYS.purchases, list);
+
+    const products = productsStore.list();
+    const product = products.find((item) => item.id === purchase.product_id);
+    if (product) {
+      product.cost_price = purchase.cost_price;
+      product.sale_price = purchase.sale_price;
+      product.stock = Math.max(0, Number(product.stock || 0) + purchase.quantity - previousQuantity);
+      product.updated_at = now();
+      write(KEYS.products, products);
+    }
+
+    return purchase;
+  },
 };
 
 // ===== Orders + items =====
@@ -380,6 +405,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   id: 1,
   shop_name: null,
   currency: "VND",
+  jpy_to_vnd_rate: 170,
   notify_on_low_stock: false,
   notify_on_new_order: false,
   notify_discord_webhook: null,
@@ -401,6 +427,7 @@ export const settingsStore = {
         ...DEFAULT_SETTINGS,
         ...parsed,
         id: isPositiveIntegerId(parsed.id) ? Number(parsed.id) : DEFAULT_SETTINGS.id,
+        jpy_to_vnd_rate: Number(parsed.jpy_to_vnd_rate ?? DEFAULT_SETTINGS.jpy_to_vnd_rate),
       };
     } catch {
       return { ...DEFAULT_SETTINGS };

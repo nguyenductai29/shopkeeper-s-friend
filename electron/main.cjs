@@ -4,6 +4,7 @@ const { app, BrowserWindow, shell } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const http = require('node:http')
+const net = require('node:net')
 const os = require('node:os')
 
 const isDev = !app.isPackaged
@@ -72,6 +73,25 @@ function isBackendResponding(port) {
   })
 }
 
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+
+    server.once('error', () => resolve(false))
+    server.once('listening', () => {
+      server.close(() => resolve(true))
+    })
+    server.listen(port, BACKEND_HOST)
+  })
+}
+
+async function findAvailablePort(startPort) {
+  for (let port = startPort; port < startPort + 20; port += 1) {
+    if (await isPortAvailable(port)) return port
+  }
+  throw new Error(`Không tìm được port backend trống từ ${startPort} đến ${startPort + 19}`)
+}
+
 async function startBackend() {
   loadEnv()
 
@@ -83,6 +103,16 @@ async function startBackend() {
   if (isDev && await isBackendResponding(backendPort)) {
     console.log(`[main] Reusing existing backend at ${getBackendUrl()}`)
     return
+  }
+
+  if (!await isPortAvailable(backendPort)) {
+    if (isDev) {
+      throw new Error(`Port backend ${backendPort} đang được dùng nhưng không phản hồi như Shopkeeper backend.`)
+    }
+
+    const fallbackPort = await findAvailablePort(backendPort + 1)
+    process.env.PORT = String(fallbackPort)
+    console.log(`[main] Backend port ${backendPort} is busy, using ${fallbackPort}`)
   }
 
   // backend/ is bundled into the asar in both dev and prod

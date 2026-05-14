@@ -1,17 +1,10 @@
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
-import { settingsStore } from '@/lib/fileStore'
-import { useEffect, useState } from 'react'
+import { useShopName } from '@/hooks/useShopName'
 import { Outlet } from 'react-router-dom'
 import { AppSidebar } from './AppSidebar'
 
 export default function AppLayout() {
-  const [shopName, setShopName] = useState('ShopFlow')
-
-  useEffect(() => {
-    settingsStore.get().then((s) => {
-      if (s.shop_name) setShopName(s.shop_name)
-    })
-  }, [])
+  const shopName = useShopName()
 
   return (
     <SidebarProvider className="h-full min-h-0 overflow-hidden">
