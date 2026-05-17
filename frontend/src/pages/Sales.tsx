@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
 import { ProductImage } from "@/components/ProductImage";
+import { RefreshButton } from "@/components/RefreshButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -60,11 +61,18 @@ function Inner() {
     direction: "desc",
   });
   const [page, setPage] = useState(1);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const loadOrders = async () => {
-    const list = await ordersStore.list();
-    setOrders(list);
-    setSelectedId((current) => current ?? list[0]?.id ?? null);
+  const loadOrders = async (showLoading = false) => {
+    if (showLoading) setRefreshing(true);
+    try {
+      const list = await ordersStore.list();
+      setOrders(list);
+      setItems({});
+      setSelectedId((current) => (list.some((order) => order.id === current) ? current : list[0]?.id ?? null));
+    } finally {
+      if (showLoading) setRefreshing(false);
+    }
   };
 
   useEffect(() => { loadOrders(); }, []);
@@ -190,9 +198,12 @@ function Inner() {
           <h1 className="text-2xl font-semibold md:text-3xl">Quản lý bán hàng</h1>
           <p className="mt-1 text-sm text-muted-foreground">Theo dõi đơn hàng, doanh thu và trạng thái thanh toán</p>
         </div>
-        <Button variant="outline" onClick={exportSales} disabled={filteredOrders.length === 0}>
-          <FileSpreadsheet className="mr-2 h-4 w-4" /> Xuất Excel
-        </Button>
+        <div className="flex gap-2">
+          <RefreshButton loading={refreshing} onClick={() => loadOrders(true)} />
+          <Button variant="outline" onClick={exportSales} disabled={filteredOrders.length === 0}>
+            <FileSpreadsheet className="mr-2 h-4 w-4" /> Xuất Excel
+          </Button>
+        </div>
       </div>
 
       <div className="grid shrink-0 gap-3 sm:grid-cols-4">

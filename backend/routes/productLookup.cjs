@@ -1,12 +1,45 @@
 'use strict';
 
 const express = require('express');
+const cheerio = require('cheerio');
 
 const router = express.Router();
 
-const USER_AGENT = "Shopkeeper's Friend/1.0 (local desktop app)";
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const LOOKUP_TIMEOUT_MS = 8000;
 const IMAGE_TIMEOUT_MS = 12000;
+const DIRECT_STORE_SEARCH_TARGETS = [
+  {
+    source: 'Amazon Japan',
+    searchUrl: (code) => `https://www.amazon.co.jp/s?k=${encodeURIComponent(code)}`,
+    hostPattern: /(^|\.)amazon\.co\.jp$/,
+    detailPatterns: [/\/dp\//, /\/gp\/product\//],
+  },
+  {
+    source: 'Rakuten',
+    searchUrl: (code) => `https://search.rakuten.co.jp/search/mall/${encodeURIComponent(code)}/`,
+    hostPattern: /(^|\.)rakuten\.co\.jp$/,
+    detailPatterns: [/item\.rakuten\.co\.jp\/[^/]+\/[^/?#]+/],
+  },
+  {
+    source: 'Yahoo Shopping',
+    searchUrl: (code) => `https://shopping.yahoo.co.jp/search?p=${encodeURIComponent(code)}`,
+    hostPattern: /(^|\.)shopping\.yahoo\.co\.jp$|(^|\.)store\.shopping\.yahoo\.co\.jp$/,
+    detailPatterns: [/store\.shopping\.yahoo\.co\.jp\/[^/]+\/[^/?#]+/],
+  },
+  {
+    source: 'Yodobashi',
+    searchUrl: (code) => `https://www.yodobashi.com/?word=${encodeURIComponent(code)}`,
+    hostPattern: /(^|\.)yodobashi\.com$/,
+    detailPatterns: [/\/product\//],
+  },
+  {
+    source: 'BicCamera',
+    searchUrl: (code) => `https://www.biccamera.com/bc/category/?q=${encodeURIComponent(code)}`,
+    hostPattern: /(^|\.)biccamera\.com$/,
+    detailPatterns: [/\/bc\/item\//],
+  },
+];
 const SHOPPING_SEARCH_TARGETS = [
   { source: 'Amazon Japan', domain: 'amazon.co.jp', hostPattern: /(^|\.)amazon\.co\.jp$/ },
   { source: 'Rakuten', domain: 'item.rakuten.co.jp', hostPattern: /(^|\.)rakuten\.co\.jp$/ },
@@ -30,6 +63,19 @@ function uniqueStrings(values) {
       seen.add(value);
       return true;
     });
+}
+
+function normalizeLookupResult(result) {
+  if (!result?.found) return null;
+  const imageUrls = uniqueStrings([
+    ...(Array.isArray(result.image_urls) ? result.image_urls : []),
+    result.image_url,
+  ].filter(isLikelyImageUrl));
+  return {
+    ...result,
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
+  };
 }
 
 async function fetchJson(url, headers = {}) {
@@ -90,12 +136,32 @@ function decodeHtml(value) {
     .trim();
 }
 
+function decodeEmbeddedString(value) {
+  if (!value) return null;
+  return decodeHtml(
+    String(value)
+      .replace(/\\u([0-9a-f]{4})/gi, (_match, hex) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/\\\//g, '/')
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'"),
+  );
+}
+
+function cleanUrlCandidate(value) {
+  const decoded = decodeEmbeddedString(value);
+  if (!decoded) return null;
+  return decoded
+    .replace(/&amp;/g, '&')
+    .replace(/[)\],};]+$/g, '')
+    .trim();
+}
+
 function absoluteUrl(value, baseUrl) {
   if (!value) return null;
   try {
-    return new URL(value, baseUrl).toString();
+    return new URL(cleanUrlCandidate(value), baseUrl).toString();
   } catch {
-    return value;
+    return cleanUrlCandidate(value);
   }
 }
 
@@ -137,19 +203,21 @@ function normalizeOpenFactsProduct(data, source) {
     product.brands,
   );
   if (!name) return null;
+  const imageUrls = uniqueStrings([
+    product.image_front_url,
+    product.image_url,
+    product.selected_images?.front?.display?.vi,
+    product.selected_images?.front?.display?.en,
+    product.selected_images?.front?.small?.vi,
+    product.selected_images?.front?.small?.en,
+  ].filter(isLikelyImageUrl));
 
   return {
     found: true,
     source,
     name,
-    image_url: pickFirst(
-      product.image_front_url,
-      product.image_url,
-      product.selected_images?.front?.display?.vi,
-      product.selected_images?.front?.display?.en,
-      product.selected_images?.front?.small?.vi,
-      product.selected_images?.front?.small?.en,
-    ),
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
   };
 }
 
@@ -170,17 +238,123 @@ function srcsetFirst(value) {
   );
 }
 
+function srcsetUrls(value) {
+  return String(value || '')
+    .split(',')
+    .map((part) => part.trim().split(/\s+/)[0])
+    .filter(Boolean);
+}
+
 function isLikelyImageUrl(value) {
-  const raw = String(value || '').trim();
-  return /^https?:\/\//i.test(raw) && !/sprite|logo|favicon|placeholder/i.test(raw);
+  const raw = cleanUrlCandidate(value);
+  if (!raw || !/^https?:\/\//i.test(raw)) return false;
+  if (/sprite|logo|favicon|placeholder|spacer|tracking|analytics|pixel/i.test(raw)) return false;
+  if (/no[-_]?image|no[-_]?photo|image[-_]?not[-_]?available|not[-_]?available|now[-_]?printing/i.test(raw)) return false;
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+
+  const fingerprint = `${parsed.hostname}${parsed.pathname}${parsed.search}`.toLowerCase();
+  if (/\.(jpg|jpeg|png|webp|gif|avif|bmp|svg)(\?|#|$)/i.test(fingerprint)) return true;
+  return /m\.media-amazon\.com\/images\/i\//i.test(fingerprint)
+    || /thumbnail\.image\.rakuten\.co\.jp/i.test(fingerprint)
+    || /image\.rakuten\.co\.jp/i.test(fingerprint)
+    || /item-shopping\.c\.yimg\.jp\/i\/j\//i.test(fingerprint)
+    || /shopping\.cdn\.yimg\.jp/i.test(fingerprint)
+    || /image\.yodobashi\.com/i.test(fingerprint)
+    || /image\.biccamera\.com/i.test(fingerprint)
+    || /\/images?\//i.test(parsed.pathname);
+}
+
+function embeddedImageUrlCandidates(html) {
+  const candidates = [];
+  const patterns = [
+    /https?:\/\/[^\s"'<>]+/gi,
+    /https?:(?:(?:\\u002[fF])|(?:\\\/)|\/){2}[^\s"'<>]+/gi,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) {
+      const value = cleanUrlCandidate(match[0]);
+      if (isLikelyImageUrl(value)) candidates.push(value);
+    }
+  }
+
+  return uniqueStrings(candidates);
+}
+
+function flattenJsonLd(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.flatMap(flattenJsonLd);
+  if (typeof value !== 'object') return [];
+
+  const nodes = [value];
+  if (value['@graph']) nodes.push(...flattenJsonLd(value['@graph']));
+  if (value.itemListElement) nodes.push(...flattenJsonLd(value.itemListElement));
+  if (value.item) nodes.push(...flattenJsonLd(value.item));
+  return nodes;
+}
+
+function isProductJsonLd(node) {
+  const type = node?.['@type'];
+  const types = Array.isArray(type) ? type : [type];
+  return types.some((item) => String(item || '').toLowerCase() === 'product');
+}
+
+function jsonLdImageUrls(image) {
+  if (!image) return [];
+  if (typeof image === 'string') return [image];
+  if (Array.isArray(image)) return image.flatMap(jsonLdImageUrls);
+  if (typeof image === 'object') return [image.url, image.contentUrl, image.thumbnailUrl].filter(Boolean);
+  return [];
+}
+
+function parseJsonLdProducts($) {
+  const products = [];
+  $('script[type="application/ld+json"]').each((_index, element) => {
+    const text = $(element).contents().text();
+    if (!text.trim()) return;
+    try {
+      const data = JSON.parse(text);
+      for (const node of flattenJsonLd(data)) {
+        if (isProductJsonLd(node)) products.push(node);
+      }
+    } catch {
+      // Ignore invalid embedded JSON-LD blocks.
+    }
+  });
+  return products;
+}
+
+function cheerioMetaContent($, name) {
+  const selector = [
+    `meta[property="${name}"]`,
+    `meta[name="${name}"]`,
+    `meta[property="${name.toLowerCase()}"]`,
+    `meta[name="${name.toLowerCase()}"]`,
+  ].join(',');
+  return pickFirst(...$(selector).map((_index, element) => $(element).attr('content')).get());
 }
 
 function htmlImageCandidates(html, baseUrl) {
+  const $ = cheerio.load(html);
+  const jsonLdProducts = parseJsonLdProducts($);
   const candidates = [
+    ...jsonLdProducts.flatMap((product) => jsonLdImageUrls(product.image)),
+    ...jsonLdProducts.flatMap((product) => jsonLdImageUrls(product.photo)),
     metaContent(html, 'og:image:secure_url'),
     metaContent(html, 'og:image'),
     metaContent(html, 'twitter:image'),
     metaContent(html, 'thumbnail'),
+    cheerioMetaContent($, 'og:image:secure_url'),
+    cheerioMetaContent($, 'og:image'),
+    cheerioMetaContent($, 'twitter:image'),
+    cheerioMetaContent($, 'thumbnail'),
+    ...embeddedImageUrlCandidates(html),
   ];
 
   for (const tag of html.match(/<link\b[^>]*>/gi) || []) {
@@ -200,6 +374,35 @@ function htmlImageCandidates(html, baseUrl) {
     const attrs = readAttributes(tag);
     candidates.push(attrs.src, attrs['data-src'], attrs['data-original'], srcsetFirst(attrs.srcset));
   }
+
+  $('link[as="image"], link[rel*="image_src"]').each((_index, element) => {
+    candidates.push($(element).attr('href'));
+  });
+
+  $('img, source, [itemprop="image"]').each((_index, element) => {
+    const node = $(element);
+    candidates.push(
+      node.attr('content'),
+      node.attr('src'),
+      node.attr('data-src'),
+      node.attr('data-original'),
+      node.attr('data-lazy'),
+      node.attr('data-image'),
+      node.attr('data-old-hires'),
+      node.attr('data-hires'),
+      ...srcsetUrls(node.attr('srcset')),
+      ...srcsetUrls(node.attr('data-srcset')),
+    );
+
+    const dynamicImage = node.attr('data-a-dynamic-image');
+    if (dynamicImage) {
+      try {
+        candidates.push(...Object.keys(JSON.parse(dynamicImage)));
+      } catch {
+        // Ignore malformed Amazon dynamic image metadata.
+      }
+    }
+  });
 
   return uniqueStrings(candidates.map((value) => absoluteUrl(value, baseUrl)).filter(isLikelyImageUrl));
 }
@@ -251,12 +454,14 @@ function normalizeUpcItemDbProduct(data) {
   const item = Array.isArray(data?.items) ? data.items[0] : null;
   const name = pickFirst(item?.title, item?.description, item?.brand);
   if (!item || !name) return null;
+  const imageUrls = Array.isArray(item.images) ? uniqueStrings(item.images.filter(isLikelyImageUrl)) : [];
 
   return {
     found: true,
     source: 'UPCitemdb',
     name,
-    image_url: Array.isArray(item.images) ? pickFirst(...item.images) : null,
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
   };
 }
 
@@ -264,12 +469,18 @@ function normalizeBarcodeFinderProduct(data) {
   const product = data?.product || data;
   const name = pickFirst(product?.title, product?.name, product?.description, product?.brand);
   if (!name) return null;
+  const imageUrls = uniqueStrings([
+    ...(Array.isArray(product.images) ? product.images : []),
+    product.image,
+    product.image_url,
+  ].filter(isLikelyImageUrl));
 
   return {
     found: true,
     source: 'BarcodeFinder',
     name,
-    image_url: Array.isArray(product.images) ? pickFirst(...product.images) : pickFirst(product.image, product.image_url),
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
   };
 }
 
@@ -282,26 +493,90 @@ function cleanProductName(value) {
     .trim();
 }
 
-async function lookupProductPage(url, source) {
-  const html = await fetchText(url);
+function isUsefulProductName(value, code) {
+  const name = cleanProductName(value);
+  if (!name || name.length < 2 || name.length > 220) return false;
+  if (code && name === code) return false;
+  if (/検索結果|search results|shopping cart|captcha|robot check|cookie|ログイン|会員登録|利用規約|プライバシー|カテゴリ|ランキング/i.test(name)) {
+    return false;
+  }
+  if (/^(amazon\.co\.jp|楽天市場|yahoo!ショッピング|ヨドバシ\.com|ビックカメラ\.com)$/i.test(name)) return false;
+  return true;
+}
+
+function textFromNode($, node) {
+  return decodeHtml($(node).text()) || null;
+}
+
+function productNameCandidates($, html) {
+  const jsonLdProducts = parseJsonLdProducts($);
+  const candidates = [
+    ...jsonLdProducts.map((product) => product.name),
+    $('#productTitle').first().text(),
+    $('[data-component-type="s-search-result"] h2 span').first().text(),
+    $('[data-testid*="product"][data-testid*="title"]').first().text(),
+    $('[itemprop="name"]').first().text(),
+    $('h1').first().text(),
+  ];
+
+  [
+    '[data-component-type="s-search-result"] h2 span',
+    'a[href*="/dp/"] h2 span',
+    'a[href*="/gp/product/"] h2 span',
+    'a[href*="item.rakuten.co.jp"]',
+    'a[href*="store.shopping.yahoo.co.jp"]',
+    'a[href*="/product/"]',
+    'a[href*="/bc/item/"]',
+  ].forEach((selector) => {
+    $(selector).slice(0, 8).each((_index, element) => {
+      candidates.push(textFromNode($, element), $(element).attr('title'), $(element).attr('aria-label'));
+    });
+  });
+
+  $('img[alt]').slice(0, 24).each((_index, element) => {
+    candidates.push($(element).attr('alt'));
+  });
+
+  candidates.push(
+    cheerioMetaContent($, 'og:title'),
+    cheerioMetaContent($, 'twitter:title'),
+    metaContent(html, 'og:title'),
+    decodeHtml(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]),
+    decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]),
+    $('title').first().text(),
+  );
+
+  return candidates;
+}
+
+function extractProductFromHtml(html, url, source, options = {}) {
   if (!html) return null;
   if (/404|not found|page not found|product-not-found/i.test(html.slice(0, 2000))) return null;
   if (/captcha|robot check|automated access|アクセスが集中|ただいまアクセスしづらい/i.test(html.slice(0, 5000))) return null;
 
-  const name = pickFirst(
-    metaContent(html, 'og:title'),
-    decodeHtml(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]),
-    decodeHtml(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]),
+  const $ = cheerio.load(html);
+  const imageUrls = htmlImageCandidates(html, url);
+  const names = uniqueStrings(
+    productNameCandidates($, html)
+      .map(cleanProductName)
+      .filter((value) => isUsefulProductName(value, options.code)),
   );
-  const cleanName = cleanProductName(name);
-  if (!cleanName) return null;
+  const cleanName = names[0] || null;
+  if (!cleanName && !imageUrls.length) return null;
+  if (!cleanName && options.requireName) return null;
 
   return {
     found: true,
     source,
     name: cleanName,
-    image_url: firstHtmlImage(html, url),
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
   };
+}
+
+async function lookupProductPage(url, source) {
+  const html = await fetchText(url);
+  return extractProductFromHtml(html, url, source, { requireName: true });
 }
 
 function unwrapDuckDuckGoUrl(href) {
@@ -345,12 +620,15 @@ async function lookupDaiso(code) {
     ['https://shop.daiso.com.tw/products/', 'Daiso Taiwan'],
   ];
 
+  let fallback = null;
   for (const [baseUrl, source] of urls) {
-    const result = await lookupProductPage(`${baseUrl}${encodeURIComponent(code)}`, source);
-    if (result?.found) return result;
+    const result = normalizeLookupResult(await lookupProductPage(`${baseUrl}${encodeURIComponent(code)}`, source));
+    if (!result?.found) continue;
+    if (result.image_urls?.length) return result;
+    fallback ||= result;
   }
 
-  return null;
+  return fallback;
 }
 
 async function lookupBarcodeFinder(code) {
@@ -366,12 +644,116 @@ async function lookupDuckDuckGo(code) {
   const html = await fetchText(`https://duckduckgo.com/html/?q=${encodeURIComponent(`"${code}" product`)}`);
   if (!html) return null;
 
+  let fallback = null;
   for (const url of extractDuckDuckGoResultUrls(html, code)) {
-    const result = await lookupProductPage(url, hostname(url) || 'Web search');
-    if (result?.found) return result;
+    const result = normalizeLookupResult(await lookupProductPage(url, hostname(url) || 'Web search'));
+    if (!result?.found) continue;
+    if (result.image_urls?.length) return result;
+    fallback ||= result;
   }
 
-  return null;
+  return fallback;
+}
+
+function unwrapStoreUrl(rawUrl, baseUrl) {
+  const absolute = absoluteUrl(rawUrl, baseUrl);
+  if (!absolute) return null;
+  try {
+    const url = new URL(absolute);
+    const wrapped = url.searchParams.get('url') || url.searchParams.get('u');
+    if (wrapped && /^https?:\/\//i.test(wrapped)) return wrapped;
+    if (wrapped && wrapped.startsWith('/')) return new URL(wrapped, url.origin).toString();
+    return url.toString();
+  } catch {
+    return absolute;
+  }
+}
+
+function canonicalProductUrl(rawUrl) {
+  if (!rawUrl) return null;
+  try {
+    const url = new URL(rawUrl);
+    const amazonMatch = url.pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
+    if (/amazon\.co\.jp$/i.test(url.hostname) && amazonMatch) {
+      return `https://www.amazon.co.jp/dp/${amazonMatch[1]}`;
+    }
+
+    url.hash = '';
+    const keepParams = new URLSearchParams();
+    url.search = keepParams.toString();
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+function extractStoreDetailUrls(html, baseUrl, target) {
+  const $ = cheerio.load(html);
+  const urls = [];
+
+  $('a[href]').each((_index, element) => {
+    const rawUrl = unwrapStoreUrl($(element).attr('href'), baseUrl);
+    const url = canonicalProductUrl(rawUrl);
+    if (!url) return;
+
+    const host = hostname(url);
+    if (!host || !target.hostPattern.test(host)) return;
+    if (/\.(pdf|zip|jpg|jpeg|png|webp|gif|svg)(\?|#|$)/i.test(url)) return;
+    if (!target.detailPatterns.some((pattern) => pattern.test(url))) return;
+    urls.push(url);
+  });
+
+  return uniqueStrings(urls).slice(0, 4);
+}
+
+async function lookupStoreSearchTarget(code, target) {
+  const searchUrl = target.searchUrl(code);
+  const html = await fetchText(searchUrl);
+  if (!html) return null;
+
+  const searchResult = normalizeLookupResult(
+    extractProductFromHtml(html, searchUrl, target.source, { code }),
+  );
+  const detailUrls = extractStoreDetailUrls(html, searchUrl, target);
+  const detailResults = await Promise.all(
+    detailUrls.map((url) => lookupProductPage(url, target.source).catch(() => null)),
+  );
+  const results = [
+    searchResult,
+    ...detailResults.map(normalizeLookupResult),
+  ].filter(Boolean);
+
+  if (!results.length) return null;
+
+  const imageUrls = uniqueStrings(results.flatMap((result) => result.image_urls || []));
+  const primary = results.find((result) => result.name && result.image_urls?.length)
+    || results.find((result) => result.name)
+    || results.find((result) => result.image_urls?.length)
+    || results[0];
+  if (!primary?.name && !imageUrls.length) return null;
+
+  return {
+    found: true,
+    source: target.source,
+    name: primary.name || null,
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
+  };
+}
+
+async function lookupDirectStoreSearch(code) {
+  const results = await Promise.all(
+    DIRECT_STORE_SEARCH_TARGETS.map((target) => lookupStoreSearchTarget(code, target).catch(() => null)),
+  );
+
+  let fallback = null;
+  for (const result of results.map(normalizeLookupResult).filter(Boolean)) {
+    if (result.image_urls?.length && result.name) return result;
+    if (result.image_urls?.length) fallback ||= result;
+    fallback ||= result;
+  }
+
+  return fallback;
 }
 
 async function lookupShoppingSearch(code) {
@@ -397,9 +779,9 @@ async function lookupShoppingSearch(code) {
 
   let fallback = null;
   for (const candidate of candidates.slice(0, 12)) {
-    const result = await lookupProductPage(candidate.url, candidate.source);
+    const result = normalizeLookupResult(await lookupProductPage(candidate.url, candidate.source));
     if (!result?.found) continue;
-    if (result.image_url) return result;
+    if (result.image_urls?.length) return result;
     fallback ||= result;
   }
 
@@ -441,19 +823,34 @@ router.get('/:code', async (req, res) => {
     () => lookupUpcItemDb(code),
     () => lookupBarcodeFinder(code),
     () => lookupDaiso(code),
+    () => lookupDirectStoreSearch(code),
     () => lookupShoppingSearch(code),
     () => lookupDuckDuckGo(code),
   ];
 
-  let fallback = null;
+  const results = [];
   for (const provider of providers) {
-    const result = await provider().catch(() => null);
+    const result = normalizeLookupResult(await provider().catch(() => null));
     if (!result?.found) continue;
-    if (result.image_url) return res.json({ code, ...result });
-    fallback ||= result;
+    results.push(result);
   }
 
-  if (fallback) return res.json({ code, ...fallback });
+  if (results.length > 0) {
+    const imageUrls = uniqueStrings(results.flatMap((result) => result.image_urls || []));
+    const primary = results.find((result) => result.name && result.image_urls?.length)
+      || results.find((result) => result.name)
+      || results.find((result) => result.image_urls?.length)
+      || results[0];
+    const sources = uniqueStrings(results.map((result) => result.source).filter(Boolean));
+    return res.json({
+      code,
+      found: true,
+      source: sources.join(', '),
+      name: primary.name,
+      image_url: imageUrls[0] || null,
+      image_urls: imageUrls,
+    });
+  }
 
   res.json({ code, found: false });
 });

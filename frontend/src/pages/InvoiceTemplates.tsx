@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { FileText, Plus, Trash2, Star, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
+import { RefreshButton } from "@/components/RefreshButton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { invoiceTemplatesStore, type EntityId, type InvoiceTemplate } from "@/lib/fileStore";
 
@@ -15,8 +16,16 @@ function Inner() {
   const [items, setItems] = useState<InvoiceTemplate[]>([]);
   const [editing, setEditing] = useState<Partial<InvoiceTemplate> | null>(null);
   const [preview, setPreview] = useState<InvoiceTemplate | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const load = async () => setItems(await invoiceTemplatesStore.list());
+  const load = async (showLoading = false) => {
+    if (showLoading) setRefreshing(true);
+    try {
+      setItems(await invoiceTemplatesStore.list());
+    } finally {
+      if (showLoading) setRefreshing(false);
+    }
+  };
   useEffect(() => { load(); }, []);
 
   const save = async () => {
@@ -50,9 +59,12 @@ function Inner() {
           <h1 className="text-2xl md:text-3xl font-semibold">Mẫu hoá đơn</h1>
           <p className="text-muted-foreground text-sm mt-1">Tạo và quản lý template hoá đơn xuất ra</p>
         </div>
-        <Button onClick={() => setEditing({ name: "", is_default: false })}>
-          <Plus className="w-4 h-4 mr-2" /> Tạo mẫu mới
-        </Button>
+        <div className="flex gap-2">
+          <RefreshButton loading={refreshing} onClick={() => load(true)} />
+          <Button onClick={() => setEditing({ name: "", is_default: false })}>
+            <Plus className="w-4 h-4 mr-2" /> Tạo mẫu mới
+          </Button>
+        </div>
       </div>
 
       <div className="grid min-h-0 flex-1 auto-rows-max gap-3 overflow-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">

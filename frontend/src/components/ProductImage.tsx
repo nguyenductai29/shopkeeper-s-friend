@@ -1,24 +1,28 @@
 import { useEffect, useState } from "react";
 import { Package } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { imageProxyUrl } from "@/lib/fileStore";
+import { imageProxyUrl, isPlaceholderImageUrl } from "@/lib/fileStore";
 
 type ProductImageProps = {
-  src?: string | null;
+  src?: string | string[] | null;
   alt?: string;
   className?: string;
   iconClassName?: string;
 };
 
 export function ProductImage({ src, alt = "", className, iconClassName }: ProductImageProps) {
-  const resolvedSrc = imageProxyUrl(src);
-  const directSrc = String(src || "").trim();
-  const sources = resolvedSrc && directSrc && resolvedSrc !== directSrc ? [resolvedSrc, directSrc] : [resolvedSrc];
+  const rawSources = (Array.isArray(src) ? src : [src])
+    .map((value) => String(value || "").trim())
+    .filter((value) => value && !isPlaceholderImageUrl(value));
+  const sources = rawSources.flatMap((value) => {
+    const proxied = imageProxyUrl(value);
+    return proxied && proxied !== value ? [proxied, value] : [proxied || value];
+  });
   const [sourceIndex, setSourceIndex] = useState(0);
 
   useEffect(() => {
     setSourceIndex(0);
-  }, [resolvedSrc]);
+  }, [rawSources.join("|")]);
 
   const activeSrc = sources[sourceIndex];
 

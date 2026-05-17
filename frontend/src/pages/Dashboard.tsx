@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { formatVND, formatNumber } from "@/lib/format";
 import { TrendingUp, TrendingDown, Wallet, ShoppingBag, Package, AlertCircle } from "lucide-react";
@@ -7,38 +7,44 @@ import {
 } from "recharts";
 import { format, subDays, startOfDay } from "date-fns";
 import { ordersStore, productsStore, type Order } from "@/lib/fileStore";
+import { RefreshButton } from "@/components/RefreshButton";
 
 export default function Dashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [productCount, setProductCount] = useState(0);
   const [unpaidCount, setUnpaidCount] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadDashboard = async () => {
+  const loadDashboard = useCallback(async (silent = false) => {
+    if (!silent) setRefreshing(true);
+    try {
       const since = subDays(new Date(), 29).toISOString();
       const [recentOrders, count, unpaidCount] = await Promise.all([
         ordersStore.listSince(since),
         productsStore.count(),
         ordersStore.unpaidCount(),
       ]);
-      if (cancelled) return;
       setOrders(recentOrders);
       setProductCount(count);
       setUnpaidCount(unpaidCount);
-    };
+      setLastUpdated(new Date());
+    } finally {
+      if (!silent) setRefreshing(false);
+    }
+  }, []);
 
-    loadDashboard();
-    const intervalId = window.setInterval(loadDashboard, 5000);
-    window.addEventListener("focus", loadDashboard);
+  useEffect(() => {
+    const refreshSilently = () => loadDashboard(true);
+    refreshSilently();
+    const intervalId = window.setInterval(refreshSilently, 5000);
+    window.addEventListener("focus", refreshSilently);
 
     return () => {
-      cancelled = true;
       window.clearInterval(intervalId);
-      window.removeEventListener("focus", loadDashboard);
+      window.removeEventListener("focus", refreshSilently);
     };
-  }, []);
+  }, [loadDashboard]);
 
   const totalRevenue = orders.reduce((s, o) => s + Number(o.total), 0);
   const totalCost = orders.reduce((s, o) => s + Number(o.cost_total), 0);
@@ -68,9 +74,15 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-      <div className="shrink-0">
-        <h1 className="text-2xl md:text-3xl font-semibold">Bảng điều khiển</h1>
-        <p className="text-muted-foreground text-sm mt-1">Tổng quan doanh thu 30 ngày gần nhất</p>
+      <div className="flex shrink-0 items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold">Bảng điều khiển</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Tổng quan doanh thu 30 ngày gần nhất
+            {lastUpdated && <span> · Cập nhật {format(lastUpdated, "HH:mm:ss")}</span>}
+          </p>
+        </div>
+        <RefreshButton loading={refreshing} onClick={() => loadDashboard(false)} />
       </div>
 
       <div className="grid shrink-0 grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

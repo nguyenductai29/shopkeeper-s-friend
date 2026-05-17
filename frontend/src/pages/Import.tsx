@@ -27,7 +27,17 @@ import { toast } from "sonner";
 import { formatVND } from "@/lib/format";
 import { AdminGate } from "@/components/AdminGate";
 import { ProductImage } from "@/components/ProductImage";
-import { productLookupStore, productsStore, purchasesStore, type EntityId, type Purchase } from "@/lib/fileStore";
+import { RefreshButton } from "@/components/RefreshButton";
+import {
+  canLoadImageUrl,
+  isPlaceholderImageUrl,
+  productLookupStore,
+  productsStore,
+  purchasesStore,
+  type EntityId,
+  type Product,
+  type Purchase,
+} from "@/lib/fileStore";
 import { exportRowsToExcel } from "@/lib/exportExcel";
 
 type LookupStatus = "idle" | "loading" | "found" | "not_found" | "error";
@@ -54,6 +64,17 @@ function formatDateTime(value: string) {
   return format(new Date(value), "dd/MM/yyyy HH:mm");
 }
 
+async function firstLoadableImageUrl(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  for (const value of values) {
+    const url = String(value || "").trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    if (await canLoadImageUrl(url)) return url;
+  }
+  return "";
+}
+
 function compareValues(a: unknown, b: unknown) {
   if (typeof a === "number" && typeof b === "number") return a - b;
   return String(a ?? "").localeCompare(String(b ?? ""), "vi", { numeric: true, sensitivity: "base" });
@@ -65,6 +86,7 @@ function ImportPageInner() {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [saving, setSaving] = useState(false);
   const [backfillingImages, setBackfillingImages] = useState(false);
+  const [refreshingPurchases, setRefreshingPurchases] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<{
     id: EntityId;
     cost_price: number;
@@ -84,8 +106,13 @@ function ImportPageInner() {
     return `draft-${Date.now()}-${draftKeyRef.current}`;
   };
 
-  const loadPurchases = async () => {
-    setPurchases(await purchasesStore.list());
+  const loadPurchases = async (showLoading = false) => {
+    if (showLoading) setRefreshingPurchases(true);
+    try {
+      setPurchases(await purchasesStore.list());
+    } finally {
+      if (showLoading) setRefreshingPurchases(false);
+    }
   };
 
   useEffect(() => { loadPurchases(); }, []);
@@ -110,13 +137,61 @@ function ImportPageInner() {
     setRows((currentRows) => currentRows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   };
 
+  const lookupOnlineForRow = async (
+    row: Pick<Row, "key" | "code" | "name" | "image_url">,
+    existingProductInput?: Product | null,
+  ) => {
+    const code = row.code.trim();
+    if (!code) return;
+
+    updateRow(row.key, {
+      lookup_status: "loading",
+      lookup_message: row.image_url ? "Đang tìm ảnh tốt hơn..." : "Đang tìm online...",
+    });
+
+    try {
+      const existingProduct = existingProductInput === undefined
+        ? await productsStore.findByCode(code)
+        : existingProductInput;
+      const result = await productLookupStore.byBarcode(code);
+      if (result.found) {
+        const imageUrl = await firstLoadableImageUrl([
+          ...(result.image_urls || []),
+          result.image_url,
+          row.image_url,
+          existingProduct?.image_url,
+        ]);
+        updateRow(row.key, {
+          name: row.name || existingProduct?.name || result.name || "",
+          image_url: imageUrl || row.image_url,
+          lookup_status: "found",
+          lookup_message: imageUrl
+            ? (result.source ? `Tìm thấy ảnh: ${result.source}` : "Tìm thấy ảnh online")
+            : (result.source ? `Tìm thấy tên: ${result.source}` : "Tìm thấy tên, chưa có ảnh"),
+        });
+      } else {
+        updateRow(row.key, {
+          lookup_status: existingProduct ? "found" : "not_found",
+          lookup_message: existingProduct ? "Đã có trong kho, chưa tìm thấy ảnh" : "Không tìm thấy, nhập tay tên SP",
+        });
+      }
+    } catch {
+      updateRow(row.key, {
+        lookup_status: existingProductInput ? "found" : "error",
+        lookup_message: existingProductInput ? "Đã có trong kho, lỗi tìm ảnh" : "Lỗi tìm online, nhập tay",
+      });
+    }
+  };
+
   const handleScan = async (e: FormEvent) => {
     e.preventDefault();
     const code = scan.trim();
     if (!code) return;
     const key = nextDraftKey();
     const existingProduct = await productsStore.findByCode(code);
-    const shouldLookupOnline = !existingProduct || !existingProduct.image_url;
+    const shouldLookupOnline = !existingProduct
+      || !existingProduct.image_url
+      || isPlaceholderImageUrl(existingProduct.image_url);
     setRows((r) => [
       ...r,
       {
@@ -138,30 +213,12 @@ function ImportPageInner() {
     scanRef.current?.focus();
 
     if (!shouldLookupOnline) return;
-
-    try {
-      const result = await productLookupStore.byBarcode(code);
-      if (result.found) {
-        updateRow(key, {
-          name: existingProduct?.name || result.name || "",
-          image_url: result.image_url || existingProduct?.image_url || "",
-          lookup_status: "found",
-          lookup_message: result.image_url
-            ? (result.source ? `Tìm thấy ảnh: ${result.source}` : "Tìm thấy ảnh online")
-            : (result.source ? `Tìm thấy tên: ${result.source}` : "Tìm thấy tên, chưa có ảnh"),
-        });
-      } else {
-        updateRow(key, {
-          lookup_status: existingProduct ? "found" : "not_found",
-          lookup_message: existingProduct ? "Đã có trong kho, chưa tìm thấy ảnh" : "Không tìm thấy, nhập tay tên SP",
-        });
-      }
-    } catch {
-      updateRow(key, {
-        lookup_status: existingProduct ? "found" : "error",
-        lookup_message: existingProduct ? "Đã có trong kho, lỗi tìm ảnh" : "Lỗi tìm online, nhập tay",
-      });
-    }
+    await lookupOnlineForRow({
+      key,
+      code,
+      name: existingProduct?.name || "",
+      image_url: existingProduct?.image_url || "",
+    }, existingProduct);
   };
 
   const update = (key: string, field: keyof Row, value: any) =>
@@ -265,21 +322,37 @@ function ImportPageInner() {
     setBackfillingImages(true);
     try {
       const products = await productsStore.list();
-      const targets = products.filter((product) => !product.image_url);
+      const targets: Product[] = [];
+
+      for (let index = 0; index < products.length; index += 5) {
+        const batch = products.slice(index, index + 5);
+        const checks = await Promise.all(
+          batch.map(async (product) => ({
+            product,
+            needsImage: !product.image_url || !(await canLoadImageUrl(product.image_url)),
+          })),
+        );
+        targets.push(...checks.filter((item) => item.needsImage).map((item) => item.product));
+      }
+
       if (targets.length === 0) {
-        toast.success("Không còn sản phẩm thiếu ảnh");
+        toast.success("Tất cả ảnh hiện tại đều load được");
         return;
       }
 
       let updated = 0;
       for (const product of targets) {
         const result = await productLookupStore.byBarcode(product.code);
-        if (!result.image_url) continue;
+        const imageUrl = await firstLoadableImageUrl([
+          ...(result.image_urls || []),
+          result.image_url,
+        ]);
+        if (!imageUrl) continue;
 
         await productsStore.upsertByCode({
           code: product.code,
           name: product.name || result.name || product.code,
-          image_url: result.image_url,
+          image_url: imageUrl,
           cost_price: product.cost_price,
           sale_price: product.sale_price,
           stock: 0,
@@ -289,9 +362,9 @@ function ImportPageInner() {
       }
 
       if (updated > 0) {
-        toast.success(`Đã cập nhật ảnh cho ${updated}/${targets.length} sản phẩm`);
+        toast.success(`Đã cập nhật ảnh load được cho ${updated}/${targets.length} sản phẩm`);
       } else {
-        toast.error("Chưa tìm thấy ảnh mới cho các sản phẩm thiếu ảnh");
+        toast.error(`Có ${targets.length} sản phẩm thiếu/ảnh lỗi nhưng chưa tìm được ảnh load được`);
       }
     } catch {
       toast.error("Lỗi khi cập nhật ảnh thiếu");
@@ -343,6 +416,7 @@ function ImportPageInner() {
           <p className="text-muted-foreground text-sm mt-1">Quét hoặc nhập mã, sau đó điền thông tin & lưu</p>
         </div>
         <div className="flex gap-2">
+          <RefreshButton loading={refreshingPurchases} onClick={() => loadPurchases(true)} />
           <Button variant="outline" onClick={backfillMissingImages} disabled={backfillingImages}>
             <RefreshCw className={`w-4 h-4 mr-2 ${backfillingImages ? "animate-spin" : ""}`} />
             {backfillingImages ? "Đang tải ảnh..." : "Tải ảnh thiếu"}
@@ -419,11 +493,24 @@ function ImportPageInner() {
                     <TableCell className="p-2"><Input type="number" value={row.quantity} onChange={(e) => update(row.key, "quantity", Number(e.target.value))} className="h-9" /></TableCell>
                     <TableCell className="p-2 text-right font-medium">{formatVND(row.cost_price * row.quantity)}</TableCell>
                     <TableCell className="p-2">
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        {row.lookup_status === "loading" && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
-                        <span className={row.lookup_status === "error" ? "text-destructive" : ""}>
-                          {row.lookup_message}
-                        </span>
+                      <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-1.5">
+                          {row.lookup_status === "loading" && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+                          <span className={row.lookup_status === "error" ? "text-destructive" : ""}>
+                            {row.lookup_message}
+                          </span>
+                        </div>
+                        {row.lookup_status !== "loading" && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 justify-start px-1.5 text-xs"
+                            onClick={() => lookupOnlineForRow(row)}
+                          >
+                            <RefreshCw className="mr-1 h-3 w-3" /> Thử lại
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell className="p-2">

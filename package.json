@@ -12,7 +12,11 @@
     "build": "npm run build:frontend",
     "build:frontend": "cd frontend && vite build",
     "dist:win": "npm run build && electron-builder --win nsis",
-    "dist:win:dir": "npm run build && electron-builder --win dir"
+    "dist:win:dir": "npm run build && electron-builder --win dir",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip",
+    "dist:mac:arm64": "npm run build && electron-builder --mac dmg zip --arm64",
+    "dist:mac:x64": "npm run build && electron-builder --mac dmg zip --x64",
+    "dist:mac:dir": "npm run build && electron-builder --mac dir"
   },
   "build": {
     "appId": "com.shopkeeper.friend",
@@ -40,6 +44,18 @@
       "icon": "frontend/public/imo_kome_authentic_logo.ico",
       "artifactName": "${productName}-${version}-Setup.${ext}",
       "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.business",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
+      "identity": null
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -77,6 +93,7 @@
     "@radix-ui/react-toggle-group": "^1.1.10",
     "@radix-ui/react-tooltip": "^1.2.7",
     "@tanstack/react-query": "^5.83.0",
+    "cheerio": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

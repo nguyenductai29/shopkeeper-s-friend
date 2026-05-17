@@ -21,6 +21,7 @@ export type ProductLookupResult = {
   found: boolean;
   name?: string | null;
   image_url?: string | null;
+  image_urls?: string[] | null;
   source?: string | null;
 };
 
@@ -63,6 +64,55 @@ export function imageProxyUrl(url: string | null | undefined): string {
     return `${BASE}/product-lookup/image?url=${encodeURIComponent(value)}`;
   }
   return value;
+}
+
+export function isPlaceholderImageUrl(url: string | null | undefined): boolean {
+  const value = String(url || '').trim();
+  return /no[-_]?image|no[-_]?photo|image[-_]?not[-_]?available|not[-_]?available|now[-_]?printing|placeholder/i.test(value);
+}
+
+export async function canLoadImageUrl(url: string | null | undefined, timeoutMs = 6000): Promise<boolean> {
+  if (isPlaceholderImageUrl(url)) return false;
+  const value = imageProxyUrl(url);
+  if (!value) return false;
+
+  const directValue = String(url || '').trim();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(value, {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.toLowerCase().startsWith('image/')) return true;
+  } catch {
+    // Fall back to browser image loading below.
+  } finally {
+    window.clearTimeout(timeout);
+  }
+
+  if (!directValue || directValue === value) return false;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const imageTimeout = window.setTimeout(() => {
+      img.onload = null;
+      img.onerror = null;
+      resolve(false);
+    }, timeoutMs);
+
+    img.onload = () => {
+      window.clearTimeout(imageTimeout);
+      resolve(true);
+    };
+    img.onerror = () => {
+      window.clearTimeout(imageTimeout);
+      resolve(false);
+    };
+    img.referrerPolicy = 'no-referrer';
+    img.src = directValue;
+  });
 }
 
 // ===== Products =====

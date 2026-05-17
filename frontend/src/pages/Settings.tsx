@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Mail, MessageSquare, Hash, Save, Send, Store } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
+import { RefreshButton } from "@/components/RefreshButton";
 import { notificationStore, settingsStore, type AppSettings } from "@/lib/fileStore";
 
 const NOTIFICATION_REASON_LABEL: Record<string, string> = {
@@ -20,10 +21,18 @@ const NOTIFICATION_REASON_LABEL: Record<string, string> = {
 function Inner() {
   const [s, setS] = useState<AppSettings | null>(null);
   const [testing, setTesting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    (async () => { setS(await settingsStore.get()); })();
-  }, []);
+  const loadSettings = async (showLoading = false) => {
+    if (showLoading) setRefreshing(true);
+    try {
+      setS(await settingsStore.get());
+    } finally {
+      if (showLoading) setRefreshing(false);
+    }
+  };
+
+  useEffect(() => { loadSettings(); }, []);
 
   const saveSettings = async () => {
     if (!s) return;
@@ -76,9 +85,12 @@ function Inner() {
 
   return (
     <div className="flex h-full min-h-0 max-w-3xl flex-col gap-3 overflow-hidden">
-      <div className="shrink-0">
-        <h1 className="text-2xl md:text-3xl font-semibold">Cài đặt</h1>
-        <p className="text-muted-foreground text-sm mt-1">Cài đặt thông báo và ứng dụng</p>
+      <div className="flex shrink-0 items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold">Cài đặt</h1>
+          <p className="text-muted-foreground text-sm mt-1">Cài đặt thông báo và ứng dụng</p>
+        </div>
+        <RefreshButton loading={refreshing} onClick={() => loadSettings(true)} />
       </div>
 
       <Card className="shrink-0 p-4 shadow-elegant space-y-3">

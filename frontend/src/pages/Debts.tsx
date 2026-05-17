@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import { Phone, MapPin, Check, ChevronDown, ChevronUp, Users, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
+import { RefreshButton } from "@/components/RefreshButton";
 import { ordersStore, orderItemsStore, type EntityId, type Order, type OrderItem } from "@/lib/fileStore";
 import { exportRowsToExcel } from "@/lib/exportExcel";
 
@@ -14,9 +15,18 @@ function Inner() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [items, setItems] = useState<Record<string, OrderItem[]>>({});
   const [open, setOpen] = useState<EntityId | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const load = async () => {
-    setOrders(await ordersStore.unpaid());
+  const load = async (showLoading = false) => {
+    if (showLoading) setRefreshing(true);
+    try {
+      const list = await ordersStore.unpaid();
+      setOrders(list);
+      setOpen((current) => (list.some((order) => order.id === current) ? current : null));
+      setItems({});
+    } finally {
+      if (showLoading) setRefreshing(false);
+    }
   };
   useEffect(() => { load(); }, []);
 
@@ -32,7 +42,7 @@ function Inner() {
   const markPaid = async (id: EntityId) => {
     await ordersStore.setPaid(id, true);
     toast.success("Đã đánh dấu đã thanh toán");
-    load();
+    await load();
   };
 
   const exportDebts = () => {
@@ -62,9 +72,12 @@ function Inner() {
           <h1 className="text-2xl md:text-3xl font-semibold">Công nợ khách hàng</h1>
           <p className="text-muted-foreground text-sm mt-1">Đơn hàng chưa thanh toán</p>
         </div>
-        <Button variant="outline" onClick={exportDebts} disabled={orders.length === 0}>
-          <FileSpreadsheet className="w-4 h-4 mr-2" /> Xuất Excel
-        </Button>
+        <div className="flex gap-2">
+          <RefreshButton loading={refreshing} onClick={() => load(true)} />
+          <Button variant="outline" onClick={exportDebts} disabled={orders.length === 0}>
+            <FileSpreadsheet className="w-4 h-4 mr-2" /> Xuất Excel
+          </Button>
+        </div>
       </div>
 
       <div className="grid shrink-0 sm:grid-cols-3 gap-3">
