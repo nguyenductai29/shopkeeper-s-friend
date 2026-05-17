@@ -75,6 +75,20 @@ async function firstLoadableImageUrl(values: Array<string | null | undefined>) {
   return "";
 }
 
+function looksUntranslatedProductName(value: string | null | undefined) {
+  const name = String(value || "").trim();
+  if (!name) return true;
+  return /[\u3040-\u30ff\u3400-\u9fff]|from japan|\bmoisturizing\b|\bcream\b|\bdry\s*skin\b|\bparaben\s*free\b|\bwet\s*(tissue|wipes)\b|\btooth\s*paste\b|\btoothpaste\b/i.test(name);
+}
+
+function preferredProductName(currentName: string | null | undefined, lookupName: string | null | undefined) {
+  const current = String(currentName || "").trim();
+  const lookup = String(lookupName || "").trim();
+  if (!current) return lookup;
+  if (lookup && lookup !== current && looksUntranslatedProductName(current)) return lookup;
+  return current;
+}
+
 function compareValues(a: unknown, b: unknown) {
   if (typeof a === "number" && typeof b === "number") return a - b;
   return String(a ?? "").localeCompare(String(b ?? ""), "vi", { numeric: true, sensitivity: "base" });
@@ -161,8 +175,9 @@ function ImportPageInner() {
           row.image_url,
           existingProduct?.image_url,
         ]);
+        const nextName = preferredProductName(row.name || existingProduct?.name, result.name);
         updateRow(row.key, {
-          name: row.name || existingProduct?.name || result.name || "",
+          name: nextName,
           image_url: imageUrl || row.image_url,
           lookup_status: "found",
           lookup_message: imageUrl
@@ -191,7 +206,8 @@ function ImportPageInner() {
     const existingProduct = await productsStore.findByCode(code);
     const shouldLookupOnline = !existingProduct
       || !existingProduct.image_url
-      || isPlaceholderImageUrl(existingProduct.image_url);
+      || isPlaceholderImageUrl(existingProduct.image_url)
+      || looksUntranslatedProductName(existingProduct.name);
     setRows((r) => [
       ...r,
       {
@@ -205,7 +221,7 @@ function ImportPageInner() {
         quantity: 1,
         lookup_status: shouldLookupOnline ? "loading" : "found",
         lookup_message: existingProduct
-          ? (existingProduct.image_url ? "Đã có trong kho" : "Đang tìm ảnh online...")
+          ? (shouldLookupOnline ? "Đang dịch/tìm online..." : "Đã có trong kho")
           : "Đang tìm online...",
       },
     ]);

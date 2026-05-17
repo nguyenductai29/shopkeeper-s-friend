@@ -2,6 +2,7 @@
 
 const express = require('express');
 const cheerio = require('cheerio');
+const { localizeProductName } = require('../productNameVi.cjs');
 
 const router = express.Router();
 
@@ -14,6 +15,13 @@ const DIRECT_STORE_SEARCH_TARGETS = [
     searchUrl: (code) => `https://www.amazon.co.jp/s?k=${encodeURIComponent(code)}`,
     hostPattern: /(^|\.)amazon\.co\.jp$/,
     detailPatterns: [/\/dp\//, /\/gp\/product\//],
+  },
+  {
+    source: 'Rakuten Books',
+    searchUrl: (code) => `https://search.books.rakuten.co.jp/bksearch/nm?g=000&sitem=${encodeURIComponent(code)}`,
+    hostPattern: /(^|\.)books\.rakuten\.co\.jp$/,
+    detailPatterns: [/\/rb\/\d+/],
+    strictCodeMatch: true,
   },
   {
     source: 'Rakuten',
@@ -42,6 +50,7 @@ const DIRECT_STORE_SEARCH_TARGETS = [
 ];
 const SHOPPING_SEARCH_TARGETS = [
   { source: 'Amazon Japan', domain: 'amazon.co.jp', hostPattern: /(^|\.)amazon\.co\.jp$/ },
+  { source: 'Rakuten Books', domain: 'books.rakuten.co.jp', hostPattern: /(^|\.)books\.rakuten\.co\.jp$/ },
   { source: 'Rakuten', domain: 'item.rakuten.co.jp', hostPattern: /(^|\.)rakuten\.co\.jp$/ },
   { source: 'Yahoo Shopping', domain: 'shopping.yahoo.co.jp', hostPattern: /(^|\.)shopping\.yahoo\.co\.jp$/ },
   { source: 'Yahoo Store', domain: 'store.shopping.yahoo.co.jp', hostPattern: /(^|\.)store\.shopping\.yahoo\.co\.jp$/ },
@@ -71,8 +80,12 @@ function normalizeLookupResult(result) {
     ...(Array.isArray(result.image_urls) ? result.image_urls : []),
     result.image_url,
   ].filter(isLikelyImageUrl));
+  const originalName = result.original_name || result.name || null;
+  const localizedName = localizeProductName(originalName) || originalName;
   return {
     ...result,
+    original_name: originalName,
+    name: localizedName,
     image_url: imageUrls[0] || null,
     image_urls: imageUrls,
   };
@@ -250,6 +263,7 @@ function isLikelyImageUrl(value) {
   if (!raw || !/^https?:\/\//i.test(raw)) return false;
   if (/sprite|logo|favicon|placeholder|spacer|tracking|analytics|pixel/i.test(raw)) return false;
   if (/no[-_]?image|no[-_]?photo|image[-_]?not[-_]?available|not[-_]?available|now[-_]?printing/i.test(raw)) return false;
+  if (/\.(css|js)(\?|#|$)/i.test(raw)) return false;
 
   let parsed;
   try {
@@ -259,6 +273,13 @@ function isLikelyImageUrl(value) {
   }
 
   const fingerprint = `${parsed.hostname}${parsed.pathname}${parsed.search}`.toLowerCase();
+  if (parsed.hostname === 'r.r10s.jp') return false;
+  if (/\/(?:common|header|footer|assets|resources|bookmark|ranking|campaign|event|banner|bnr|spux|button|btn|icon|logo|cart|mypage|point|crown|free[_-]?shipping)\//i.test(parsed.pathname)) {
+    return false;
+  }
+  if (/(?:^|[_/-])(?:icon|logo|banner|bnr|btn|point|crown|cart|mypage|ranking|campaign|free[_-]?shipping)(?:[_./-]|$)/i.test(parsed.pathname)) {
+    return false;
+  }
   if (/\.(jpg|jpeg|png|webp|gif|avif|bmp|svg)(\?|#|$)/i.test(fingerprint)) return true;
   return /m\.media-amazon\.com\/images\/i\//i.test(fingerprint)
     || /thumbnail\.image\.rakuten\.co\.jp/i.test(fingerprint)
@@ -497,7 +518,7 @@ function isUsefulProductName(value, code) {
   const name = cleanProductName(value);
   if (!name || name.length < 2 || name.length > 220) return false;
   if (code && name === code) return false;
-  if (/検索結果|search results|shopping cart|captcha|robot check|cookie|ログイン|会員登録|利用規約|プライバシー|カテゴリ|ランキング/i.test(name)) {
+  if (/検索結果|search results|shopping cart|captcha|robot check|cookie|ログイン|会員登録|利用規約|プライバシー|カテゴリ|ランキング|もっと詳しく|詳しく|詳細|レビュー|買い物かご|カート|お気に入り/i.test(name)) {
     return false;
   }
   if (/^(amazon\.co\.jp|楽天市場|yahoo!ショッピング|ヨドバシ\.com|ビックカメラ\.com)$/i.test(name)) return false;
@@ -706,14 +727,33 @@ function extractStoreDetailUrls(html, baseUrl, target) {
   return uniqueStrings(urls).slice(0, 4);
 }
 
+function barcodeVariants(code) {
+  const raw = String(code || '').trim();
+  return uniqueStrings([raw, raw.replace(/^0+/, '')].filter(Boolean));
+}
+
+function resultMatchesBarcode(result, code) {
+  if (!result?.found) return false;
+  const text = [
+    result.name,
+    result.original_name,
+    result.image_url,
+    ...(Array.isArray(result.image_urls) ? result.image_urls : []),
+  ].join(' ');
+  return barcodeVariants(code).some((variant) => variant && text.includes(variant));
+}
+
 async function lookupStoreSearchTarget(code, target) {
   const searchUrl = target.searchUrl(code);
   const html = await fetchText(searchUrl);
   if (!html) return null;
 
-  const searchResult = normalizeLookupResult(
+  let searchResult = normalizeLookupResult(
     extractProductFromHtml(html, searchUrl, target.source, { code }),
   );
+  if (target.strictCodeMatch && !resultMatchesBarcode(searchResult, code)) {
+    searchResult = null;
+  }
   const detailUrls = extractStoreDetailUrls(html, searchUrl, target);
   const detailResults = await Promise.all(
     detailUrls.map((url) => lookupProductPage(url, target.source).catch(() => null)),
@@ -721,7 +761,7 @@ async function lookupStoreSearchTarget(code, target) {
   const results = [
     searchResult,
     ...detailResults.map(normalizeLookupResult),
-  ].filter(Boolean);
+  ].filter((result) => result && (!target.strictCodeMatch || resultMatchesBarcode(result, code)));
 
   if (!results.length) return null;
 

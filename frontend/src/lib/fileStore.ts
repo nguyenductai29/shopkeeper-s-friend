@@ -20,6 +20,7 @@ export type ProductLookupResult = {
   code: string;
   found: boolean;
   name?: string | null;
+  original_name?: string | null;
   image_url?: string | null;
   image_urls?: string[] | null;
   source?: string | null;
