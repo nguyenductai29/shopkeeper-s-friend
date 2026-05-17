@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { formatVND } from "@/lib/format";
-import { Search, ScanLine, Trash2, Plus, Minus, ShoppingCart, Package } from "lucide-react";
+import { ScanLine, Trash2, Plus, Minus, ShoppingCart, Package } from "lucide-react";
 import { toast } from "sonner";
 import { ProductImage } from "@/components/ProductImage";
 import { RefreshButton } from "@/components/RefreshButton";
@@ -16,8 +16,7 @@ type CartItem = Product & { qty: number };
 
 export default function POS() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [search, setSearch] = useState("");
-  const [scan, setScan] = useState("");
+  const [query, setQuery] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -25,7 +24,22 @@ export default function POS() {
   const [paid, setPaid] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const scanRef = useRef<HTMLInputElement>(null);
+  const productInputRef = useRef<HTMLInputElement>(null);
+
+  const focusProductInput = () => {
+    window.setTimeout(() => productInputRef.current?.focus(), 0);
+  };
+
+  const keepProductInputFocused = () => {
+    window.setTimeout(() => {
+      const active = document.activeElement;
+      const canReceiveText = active instanceof HTMLInputElement
+        || active instanceof HTMLTextAreaElement
+        || active instanceof HTMLSelectElement
+        || active?.getAttribute("contenteditable") === "true";
+      if (!canReceiveText) productInputRef.current?.focus();
+    }, 0);
+  };
 
   const load = async (showLoading = false) => {
     if (showLoading) setRefreshing(true);
@@ -46,10 +60,16 @@ export default function POS() {
       if (showLoading) setRefreshing(false);
     }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    focusProductInput();
+  }, []);
 
   const filtered = products.filter(
-    (p) => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase().includes(search.toLowerCase())
+    (p) => {
+      const keyword = query.trim().toLowerCase();
+      return !keyword || p.name.toLowerCase().includes(keyword) || p.code.toLowerCase().includes(keyword);
+    }
   );
 
   const addToCart = (p: Product) => {
@@ -73,17 +93,22 @@ export default function POS() {
     return true;
   };
 
-  const handleScan = (e: React.FormEvent) => {
+  const handleProductInputSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const code = scan.trim();
-    if (!code) return;
-    const p = products.find((x) => x.code.toLowerCase() === code.toLowerCase());
-    if (p) {
-      if (addToCart(p)) toast.success(`Đã thêm: ${p.name}`);
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return focusProductInput();
+
+    const exactCode = products.find((x) => x.code.toLowerCase() === keyword);
+    const product = exactCode || (filtered.length === 1 ? filtered[0] : null);
+    if (product) {
+      if (addToCart(product)) {
+        toast.success(`Đã thêm: ${product.name}`);
+        setQuery("");
+      }
+    } else {
+      toast.error("Không tìm thấy sản phẩm khớp mã/từ khóa");
     }
-    else toast.error("Không tìm thấy sản phẩm");
-    setScan("");
-    scanRef.current?.focus();
+    focusProductInput();
   };
 
   const updateQty = (id: EntityId, delta: number) => {
@@ -160,19 +185,20 @@ export default function POS() {
       <div className="grid flex-1 min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_400px]">
         {/* Products */}
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
-          <div className="flex shrink-0 flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder="Tìm sản phẩm..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <form onSubmit={handleProductInputSubmit} className="shrink-0 rounded-md border bg-card p-2 shadow-elegant">
+            <div className="relative">
+              <ScanLine className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary" />
+              <Input
+                ref={productInputRef}
+                autoFocus
+                placeholder="Tìm sản phẩm hoặc quét mã vạch, Enter để thêm..."
+                className="h-11 pl-9"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onBlur={keepProductInputFocused}
+              />
             </div>
-            <form onSubmit={handleScan} className="flex gap-2">
-              <div className="relative flex-1">
-                <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" />
-                <Input ref={scanRef} placeholder="Quét/nhập mã..." className="pl-9" value={scan} onChange={(e) => setScan(e.target.value)} />
-              </div>
-              <Button type="submit">Thêm</Button>
-            </form>
-          </div>
+          </form>
 
           <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-card p-2 shadow-elegant">
             <div className="grid h-full min-h-0 auto-rows-max grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
@@ -187,7 +213,10 @@ export default function POS() {
               return (
               <Card
                 key={p.id}
-                onClick={() => addToCart(p)}
+                onClick={() => {
+                  addToCart(p);
+                  focusProductInput();
+                }}
                 className={`p-2 transition-all gradient-card ${
                   outOfStock
                     ? "cursor-not-allowed opacity-60"
