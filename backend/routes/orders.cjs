@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { now, saveDb, queryAll, run, boolRows, lastInsertId } = require('../db.cjs');
-const { notifyNewOrder } = require('../notifications.cjs');
+const { notifyDebtOrder, notifyNewOrder } = require('../notifications.cjs');
 
 const router = express.Router();
 
@@ -40,6 +40,7 @@ router.post('/', (req, res) => {
   saveDb();
   const response = { id, ...created, paid: !!created.paid };
   notifyNewOrder(response).catch((err) => console.error('[notify] Lỗi gửi thông báo đơn hàng:', err));
+  notifyDebtOrder(response).catch((err) => console.error('[notify] Lỗi gửi thông báo công nợ:', err));
   res.json(response);
 });
 

@@ -4,19 +4,59 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Mail, MessageSquare, Hash, Save, Send, Store } from "lucide-react";
+import { AlertTriangle, Hash, PackagePlus, ReceiptText, Save, Send, Store, Users, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
 import { RefreshButton } from "@/components/RefreshButton";
 import { notificationStore, settingsStore, type AppSettings } from "@/lib/fileStore";
 
 const NOTIFICATION_REASON_LABEL: Record<string, string> = {
-  missing_recipient: "thiếu email nhận",
-  missing_smtp: "thiếu SMTP",
-  missing_token: "thiếu token",
-  missing_page: "thiếu page",
   missing_webhook: "thiếu webhook",
 };
+
+type ToggleKey = "notify_on_new_order" | "notify_on_purchase" | "notify_on_low_stock" | "notify_on_debt";
+type WebhookKey =
+  | "notify_discord_sales_webhook"
+  | "notify_discord_purchase_webhook"
+  | "notify_discord_low_stock_webhook"
+  | "notify_discord_debt_webhook";
+
+const DISCORD_CHANNELS: Array<{
+  label: string;
+  description: string;
+  toggleKey: ToggleKey;
+  webhookKey: WebhookKey;
+  Icon: LucideIcon;
+}> = [
+  {
+    label: "Quản lý bán hàng",
+    description: "Gửi khi tạo đơn hàng mới",
+    toggleKey: "notify_on_new_order",
+    webhookKey: "notify_discord_sales_webhook",
+    Icon: ReceiptText,
+  },
+  {
+    label: "Nhập hàng",
+    description: "Gửi khi lưu phiếu nhập hàng",
+    toggleKey: "notify_on_purchase",
+    webhookKey: "notify_discord_purchase_webhook",
+    Icon: PackagePlus,
+  },
+  {
+    label: "Hết hàng",
+    description: "Gửi khi tồn kho xuống ngưỡng thấp",
+    toggleKey: "notify_on_low_stock",
+    webhookKey: "notify_discord_low_stock_webhook",
+    Icon: AlertTriangle,
+  },
+  {
+    label: "Công nợ",
+    description: "Gửi khi phát sinh đơn chưa thanh toán",
+    toggleKey: "notify_on_debt",
+    webhookKey: "notify_discord_debt_webhook",
+    Icon: Users,
+  },
+];
 
 function Inner() {
   const [s, setS] = useState<AppSettings | null>(null);
@@ -60,7 +100,7 @@ function Inner() {
         return;
       }
 
-      const sent = result.results.filter((item) => item.sent).map((item) => item.channel);
+      const sent = result.results.filter((item) => item.sent).map((item) => item.label || item.channel);
       const failed = result.results.filter((item) => item.error);
       const skipped = result.results.filter((item) => item.skipped);
 
@@ -70,7 +110,8 @@ function Inner() {
       if (failed.length || skipped.length) {
         const channels = [...failed, ...skipped].map((item) => {
           const reason = item.reason ? NOTIFICATION_REASON_LABEL[item.reason] : null;
-          return reason ? `${item.channel} (${reason})` : item.channel;
+          const label = item.label || item.channel;
+          return reason ? `${label} (${reason})` : label;
         }).join(", ");
         toast.error(`Chưa gửi được: ${channels}`);
       }
@@ -84,7 +125,7 @@ function Inner() {
   if (!s) return <div className="text-muted-foreground">Đang tải...</div>;
 
   return (
-    <div className="flex h-full min-h-0 max-w-3xl flex-col gap-3 overflow-hidden">
+    <div className="flex h-full min-h-0 max-w-5xl flex-col gap-3 overflow-hidden">
       <div className="flex shrink-0 items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-semibold">Cài đặt</h1>
@@ -116,33 +157,38 @@ function Inner() {
         </div>
       </Card>
 
-      <Card className="shrink-0 p-4 shadow-elegant space-y-3">
-        <h3 className="font-semibold">Kênh thông báo</h3>
-        <div className="space-y-3">
+      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 shadow-elegant">
+        <div className="mb-3 flex shrink-0 items-center gap-2">
+          <Hash className="h-5 w-5 text-primary" />
           <div>
-            <Label className="flex items-center gap-2"><Mail className="w-4 h-4 text-primary" /> Email nhận thông báo</Label>
-            <Input type="email" placeholder="ban@shop.com" value={s.notify_email || ""} onChange={(e) => setS({ ...s, notify_email: e.target.value })} />
-          </div>
-          <div>
-            <Label className="flex items-center gap-2"><MessageSquare className="w-4 h-4 text-primary" /> Facebook (page ID / link)</Label>
-            <Input placeholder="fb.com/your-page" value={s.notify_facebook || ""} onChange={(e) => setS({ ...s, notify_facebook: e.target.value })} />
-          </div>
-          <div>
-            <Label className="flex items-center gap-2"><Hash className="w-4 h-4 text-primary" /> Discord webhook URL</Label>
-            <Input placeholder="https://discord.com/api/webhooks/..." value={s.notify_discord_webhook || ""} onChange={(e) => setS({ ...s, notify_discord_webhook: e.target.value })} />
+            <h3 className="font-semibold">Discord webhook theo nghiệp vụ</h3>
+            <p className="text-xs text-muted-foreground">Mỗi dòng có thể trỏ tới một channel Discord khác nhau</p>
           </div>
         </div>
-      </Card>
-
-      <Card className="shrink-0 p-4 shadow-elegant space-y-3">
-        <h3 className="font-semibold">Loại thông báo</h3>
-        <div className="flex items-center justify-between bg-muted/40 rounded-md px-3 py-2">
-          <Label htmlFor="n1" className="cursor-pointer">Khi có đơn hàng mới</Label>
-          <Switch id="n1" checked={s.notify_on_new_order} onCheckedChange={(v) => setS({ ...s, notify_on_new_order: v })} />
-        </div>
-        <div className="flex items-center justify-between bg-muted/40 rounded-md px-3 py-2">
-          <Label htmlFor="n2" className="cursor-pointer">Khi sản phẩm sắp hết hàng</Label>
-          <Switch id="n2" checked={s.notify_on_low_stock} onCheckedChange={(v) => setS({ ...s, notify_on_low_stock: v })} />
+        <div className="grid min-h-0 flex-1 gap-3 overflow-auto pr-1 md:grid-cols-2">
+          {DISCORD_CHANNELS.map(({ label, description, toggleKey, webhookKey, Icon }) => (
+            <div key={webhookKey} className="rounded-md border bg-muted/20 p-3">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2">
+                  <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <div className="min-w-0">
+                    <Label htmlFor={toggleKey} className="cursor-pointer font-medium">{label}</Label>
+                    <div className="text-xs text-muted-foreground">{description}</div>
+                  </div>
+                </div>
+                <Switch
+                  id={toggleKey}
+                  checked={Boolean(s[toggleKey])}
+                  onCheckedChange={(value) => setS({ ...s, [toggleKey]: value })}
+                />
+              </div>
+              <Input
+                placeholder="https://discord.com/api/webhooks/..."
+                value={s[webhookKey] || ""}
+                onChange={(event) => setS({ ...s, [webhookKey]: event.target.value })}
+              />
+            </div>
+          ))}
         </div>
       </Card>
 

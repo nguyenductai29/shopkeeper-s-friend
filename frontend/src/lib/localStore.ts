@@ -71,9 +71,13 @@ export type AppSettings = {
   jpy_to_vnd_rate: number;
   notify_on_low_stock: boolean;
   notify_on_new_order: boolean;
+  notify_on_purchase: boolean;
+  notify_on_debt: boolean;
   notify_discord_webhook: string | null;
-  notify_facebook: string | null;
-  notify_email: string | null;
+  notify_discord_sales_webhook: string | null;
+  notify_discord_purchase_webhook: string | null;
+  notify_discord_low_stock_webhook: string | null;
+  notify_discord_debt_webhook: string | null;
   updated_at: string;
 };
 
@@ -408,9 +412,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   jpy_to_vnd_rate: 170,
   notify_on_low_stock: false,
   notify_on_new_order: false,
+  notify_on_purchase: false,
+  notify_on_debt: false,
   notify_discord_webhook: null,
-  notify_facebook: null,
-  notify_email: null,
+  notify_discord_sales_webhook: null,
+  notify_discord_purchase_webhook: null,
+  notify_discord_low_stock_webhook: null,
+  notify_discord_debt_webhook: null,
   updated_at: now(),
 };
 
@@ -428,6 +436,10 @@ export const settingsStore = {
         ...parsed,
         id: isPositiveIntegerId(parsed.id) ? Number(parsed.id) : DEFAULT_SETTINGS.id,
         jpy_to_vnd_rate: Number(parsed.jpy_to_vnd_rate ?? DEFAULT_SETTINGS.jpy_to_vnd_rate),
+        notify_discord_sales_webhook: parsed.notify_discord_sales_webhook ?? parsed.notify_discord_webhook ?? null,
+        notify_discord_purchase_webhook: parsed.notify_discord_purchase_webhook ?? parsed.notify_discord_webhook ?? null,
+        notify_discord_low_stock_webhook: parsed.notify_discord_low_stock_webhook ?? parsed.notify_discord_webhook ?? null,
+        notify_discord_debt_webhook: parsed.notify_discord_debt_webhook ?? parsed.notify_discord_webhook ?? null,
       };
     } catch {
       return { ...DEFAULT_SETTINGS };

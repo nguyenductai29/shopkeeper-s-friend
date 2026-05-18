@@ -654,10 +654,24 @@ async function fetchYahooShopping(params) {
   return data;
 }
 
+function configuredApiKey(provider) {
+  return queryGet(`SELECT * FROM api_keys WHERE provider = ? AND enabled = 1`, [provider]);
+}
+
+function configuredApiValue(provider, ...fields) {
+  const row = configuredApiKey(provider);
+  return pickFirst(...fields.map((field) => row?.[field]));
+}
+
 function getRakutenCredentials() {
-  const applicationId = process.env.RAKUTEN_APPLICATION_ID || process.env.RAKUTEN_APP_ID;
-  const accessKey = process.env.RAKUTEN_ACCESS_KEY;
-  const affiliateId = process.env.RAKUTEN_AFFILIATE_ID;
+  const row = configuredApiKey('rakuten');
+  const applicationId = pickFirst(
+    row?.application_id,
+    process.env.RAKUTEN_APPLICATION_ID,
+    process.env.RAKUTEN_APP_ID,
+  );
+  const accessKey = pickFirst(row?.access_key, row?.api_key, process.env.RAKUTEN_ACCESS_KEY);
+  const affiliateId = pickFirst(row?.affiliate_id, process.env.RAKUTEN_AFFILIATE_ID);
   if (!applicationId || !accessKey) return null;
   return { applicationId, accessKey, affiliateId };
 }
@@ -961,7 +975,8 @@ async function lookupDaiso(code) {
 }
 
 async function lookupBarcodeFinder(code) {
-  const apiKey = process.env.BARCODEFINDER_API_KEY;
+  const apiKey = configuredApiValue('barcodefinder', 'api_key', 'access_key')
+    || process.env.BARCODEFINDER_API_KEY;
   if (!apiKey) return null;
   const data = await fetchJson(`https://api.barcodefinder.info/v1/product/${encodeURIComponent(code)}`, {
     'x-barcode-key': apiKey,
@@ -970,7 +985,10 @@ async function lookupBarcodeFinder(code) {
 }
 
 async function lookupYahooShopping(code) {
-  const appId = process.env.YAHOO_JP_APP_ID || process.env.YAHOO_SHOPPING_APP_ID || DEFAULT_YAHOO_JP_APP_ID;
+  const appId = configuredApiValue('yahoo_shopping', 'application_id', 'api_key')
+    || process.env.YAHOO_JP_APP_ID
+    || process.env.YAHOO_SHOPPING_APP_ID
+    || DEFAULT_YAHOO_JP_APP_ID;
   if (!appId) return null;
 
   const params = new URLSearchParams({

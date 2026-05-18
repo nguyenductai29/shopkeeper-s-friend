@@ -20,6 +20,7 @@ import { RefreshButton } from "@/components/RefreshButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -31,7 +32,15 @@ import {
 } from "@/components/ui/table";
 import { exportRowsToExcel } from "@/lib/exportExcel";
 import { formatVND } from "@/lib/format";
-import { orderItemsStore, ordersStore, type EntityId, type Order, type OrderItem } from "@/lib/fileStore";
+import {
+  invoiceTemplatesStore,
+  orderItemsStore,
+  ordersStore,
+  type EntityId,
+  type InvoiceTemplate,
+  type Order,
+  type OrderItem,
+} from "@/lib/fileStore";
 
 type SortKey = "id" | "created_at" | "customer_name" | "total" | "cost_total" | "profit" | "paid";
 type SortDirection = "asc" | "desc";
@@ -54,7 +63,9 @@ function compareValues(a: unknown, b: unknown) {
 function Inner() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [items, setItems] = useState<Record<string, OrderItem[]>>({});
+  const [templates, setTemplates] = useState<InvoiceTemplate[]>([]);
   const [selectedId, setSelectedId] = useState<EntityId | null>(null);
+  const [invoiceOrderId, setInvoiceOrderId] = useState<EntityId | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
     key: "created_at",
@@ -66,8 +77,12 @@ function Inner() {
   const loadOrders = async (showLoading = false) => {
     if (showLoading) setRefreshing(true);
     try {
-      const list = await ordersStore.list();
+      const [list, templateList] = await Promise.all([
+        ordersStore.list(),
+        invoiceTemplatesStore.list(),
+      ]);
       setOrders(list);
+      setTemplates(templateList);
       setItems({});
       setSelectedId((current) => (list.some((order) => order.id === current) ? current : list[0]?.id ?? null));
     } finally {
@@ -79,6 +94,9 @@ function Inner() {
 
   const selectedOrder = orders.find((order) => order.id === selectedId) ?? null;
   const selectedItems = selectedId ? items[String(selectedId)] || [] : [];
+  const invoiceOrder = orders.find((order) => order.id === invoiceOrderId) ?? null;
+  const invoiceItems = invoiceOrderId ? items[String(invoiceOrderId)] || [] : [];
+  const invoiceTemplate = templates.find((template) => template.is_default) || templates[0] || null;
 
   const filteredOrders = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -147,12 +165,24 @@ function Inner() {
     );
   };
 
-  const openOrder = async (id: EntityId) => {
-    setSelectedId(id);
+  const loadOrderItems = async (id: EntityId) => {
     if (!items[String(id)]) {
       const orderItems = await orderItemsStore.forOrder(id);
       setItems((current) => ({ ...current, [String(id)]: orderItems }));
+      return orderItems;
     }
+    return items[String(id)];
+  };
+
+  const openOrder = async (id: EntityId) => {
+    setSelectedId(id);
+    await loadOrderItems(id);
+  };
+
+  const openInvoice = async (id: EntityId) => {
+    setSelectedId(id);
+    setInvoiceOrderId(id);
+    await loadOrderItems(id);
   };
 
   useEffect(() => {
@@ -294,8 +324,9 @@ function Inner() {
                         variant="ghost"
                         onClick={(event) => {
                           event.stopPropagation();
-                          openOrder(order.id);
+                          openInvoice(order.id);
                         }}
+                        title="Xem hoá đơn"
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
@@ -400,6 +431,62 @@ function Inner() {
           )}
         </Card>
       </div>
+
+      <Dialog open={!!invoiceOrderId} onOpenChange={(open) => !open && setInvoiceOrderId(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{invoiceOrder ? `Hoá đơn #${invoiceOrder.id}` : "Hoá đơn"}</DialogTitle>
+          </DialogHeader>
+          {invoiceOrder && (
+            <div className="rounded-md border bg-white p-5 font-mono text-sm text-black">
+              <div className="text-center">
+                <div className="text-lg font-bold">{invoiceTemplate?.shop_name || "ShopFlow"}</div>
+                {invoiceTemplate?.shop_address && <div className="text-xs">{invoiceTemplate.shop_address}</div>}
+                {invoiceTemplate?.shop_phone && <div className="text-xs">SĐT: {invoiceTemplate.shop_phone}</div>}
+              </div>
+              <div className="my-3 border-t border-dashed border-black/60" />
+              <div className="text-center font-semibold">HOÁ ĐƠN BÁN HÀNG</div>
+              <div className="mt-1 text-center text-xs">{formatDateTime(invoiceOrder.created_at)}</div>
+              {invoiceTemplate?.header_note && (
+                <div className="mt-2 text-xs italic">{invoiceTemplate.header_note}</div>
+              )}
+              <div className="my-3 border-t border-dashed border-black/60" />
+              <div className="space-y-1 text-xs">
+                <div>Khách: {invoiceOrder.customer_name || "Khách lẻ"}</div>
+                {invoiceOrder.customer_phone && <div>SĐT: {invoiceOrder.customer_phone}</div>}
+                {invoiceOrder.customer_address && <div>Địa chỉ: {invoiceOrder.customer_address}</div>}
+              </div>
+              <div className="my-3 border-t border-dashed border-black/60" />
+              <div className="max-h-64 space-y-2 overflow-auto pr-1">
+                {invoiceItems.length === 0 && (
+                  <div className="py-4 text-center text-xs text-black/60">Chưa có chi tiết sản phẩm</div>
+                )}
+                {invoiceItems.map((item) => (
+                  <div key={item.id}>
+                    <div className="font-medium">{item.product_name}</div>
+                    <div className="flex justify-between text-xs">
+                      <span>{formatVND(item.sale_price)} x {item.quantity}</span>
+                      <span>{formatVND(item.subtotal)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="my-3 border-t border-dashed border-black/60" />
+              <div className="flex justify-between text-base font-bold">
+                <span>Tổng</span>
+                <span>{formatVND(invoiceOrder.total)}</span>
+              </div>
+              <div className="mt-1 text-xs">
+                Thanh toán: {invoiceOrder.paid ? "Đã thanh toán" : "Chưa thanh toán"}
+              </div>
+              <div className="my-3 border-t border-dashed border-black/60" />
+              <div className="text-center text-xs italic">
+                {invoiceTemplate?.footer_note || "Cảm ơn quý khách!"}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

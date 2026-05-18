@@ -47,11 +47,19 @@ const DEFAULT_SETTINGS = {
   jpy_to_vnd_rate: 170,
   notify_on_low_stock: false,
   notify_on_new_order: false,
+  notify_on_purchase: false,
+  notify_on_debt: false,
   notify_discord_webhook: null,
+  notify_discord_sales_webhook: null,
+  notify_discord_purchase_webhook: null,
+  notify_discord_low_stock_webhook: null,
+  notify_discord_debt_webhook: null,
   notify_facebook: null,
   notify_email: null,
   updated_at: new Date().toISOString(),
 };
+
+const DEFAULT_YAHOO_JP_APP_ID = 'dmVyPTIwMjUwNyZpZD1tQ3p1WlhLYW82Jmhhc2g9TldabU1tVTNNbUkyWlRaa1pUazBNQQ';
 
 function boolRow(row) {
   if (!row) return row;
@@ -60,6 +68,8 @@ function boolRow(row) {
   if ('is_default' in out) out.is_default = !!out.is_default;
   if ('notify_on_low_stock' in out) out.notify_on_low_stock = !!out.notify_on_low_stock;
   if ('notify_on_new_order' in out) out.notify_on_new_order = !!out.notify_on_new_order;
+  if ('notify_on_purchase' in out) out.notify_on_purchase = !!out.notify_on_purchase;
+  if ('notify_on_debt' in out) out.notify_on_debt = !!out.notify_on_debt;
   return out;
 }
 
@@ -113,6 +123,104 @@ function ensureColumn(tableName, columnName, definition) {
   if (!hasColumn(tableName, columnName)) {
     run(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
   }
+}
+
+function normalizeEnvValue(value) {
+  const normalized = String(value || '').trim();
+  return normalized || null;
+}
+
+function defaultApiKeyRows() {
+  return [
+    {
+      provider: 'yahoo_shopping',
+      name: 'Yahoo Shopping API',
+      application_id: normalizeEnvValue(process.env.YAHOO_JP_APP_ID || process.env.YAHOO_SHOPPING_APP_ID) || DEFAULT_YAHOO_JP_APP_ID,
+      access_key: null,
+      affiliate_id: null,
+      api_key: null,
+    },
+    {
+      provider: 'rakuten',
+      name: 'Rakuten Web Service',
+      application_id: normalizeEnvValue(process.env.RAKUTEN_APPLICATION_ID || process.env.RAKUTEN_APP_ID),
+      access_key: normalizeEnvValue(process.env.RAKUTEN_ACCESS_KEY),
+      affiliate_id: normalizeEnvValue(process.env.RAKUTEN_AFFILIATE_ID),
+      api_key: null,
+    },
+    {
+      provider: 'barcodefinder',
+      name: 'BarcodeFinder',
+      application_id: null,
+      access_key: null,
+      affiliate_id: null,
+      api_key: normalizeEnvValue(process.env.BARCODEFINDER_API_KEY),
+    },
+  ].filter((row) => row.application_id || row.access_key || row.affiliate_id || row.api_key);
+}
+
+function seedDefaultApiKeys() {
+  const timestamp = now();
+  for (const row of defaultApiKeyRows()) {
+    const existing = queryGet(`SELECT id FROM api_keys WHERE provider = ?`, [row.provider]);
+    if (!existing) {
+      run(
+        `INSERT INTO api_keys
+          (provider,name,application_id,access_key,affiliate_id,api_key,enabled,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        [
+          row.provider,
+          row.name,
+          row.application_id,
+          row.access_key,
+          row.affiliate_id,
+          row.api_key,
+          1,
+          timestamp,
+          timestamp,
+        ],
+      );
+      continue;
+    }
+
+    run(
+      `UPDATE api_keys SET
+        name=COALESCE(NULLIF(name,''), ?),
+        application_id=COALESCE(NULLIF(application_id,''), ?),
+        access_key=COALESCE(NULLIF(access_key,''), ?),
+        affiliate_id=COALESCE(NULLIF(affiliate_id,''), ?),
+        api_key=COALESCE(NULLIF(api_key,''), ?),
+        updated_at=updated_at
+       WHERE provider=?`,
+      [
+        row.name,
+        row.application_id,
+        row.access_key,
+        row.affiliate_id,
+        row.api_key,
+        row.provider,
+      ],
+    );
+  }
+}
+
+function ensureDiscordSettingsColumns() {
+  ensureColumn('settings', 'notify_on_purchase', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('settings', 'notify_on_debt', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('settings', 'notify_discord_sales_webhook', 'TEXT');
+  ensureColumn('settings', 'notify_discord_purchase_webhook', 'TEXT');
+  ensureColumn('settings', 'notify_discord_low_stock_webhook', 'TEXT');
+  ensureColumn('settings', 'notify_discord_debt_webhook', 'TEXT');
+
+  run(`
+    UPDATE settings SET
+      notify_discord_sales_webhook=COALESCE(notify_discord_sales_webhook, notify_discord_webhook),
+      notify_discord_purchase_webhook=COALESCE(notify_discord_purchase_webhook, notify_discord_webhook),
+      notify_discord_low_stock_webhook=COALESCE(notify_discord_low_stock_webhook, notify_discord_webhook),
+      notify_discord_debt_webhook=COALESCE(notify_discord_debt_webhook, notify_discord_webhook)
+    WHERE notify_discord_webhook IS NOT NULL
+      AND notify_discord_webhook <> ''
+  `);
 }
 
 function mappedNullableId(map, value) {
@@ -363,7 +471,13 @@ function migrateSettingsAutoIncrementId() {
         jpy_to_vnd_rate REAL NOT NULL DEFAULT 170,
         notify_on_low_stock INTEGER NOT NULL DEFAULT 0,
         notify_on_new_order INTEGER NOT NULL DEFAULT 0,
+        notify_on_purchase INTEGER NOT NULL DEFAULT 0,
+        notify_on_debt INTEGER NOT NULL DEFAULT 0,
         notify_discord_webhook TEXT,
+        notify_discord_sales_webhook TEXT,
+        notify_discord_purchase_webhook TEXT,
+        notify_discord_low_stock_webhook TEXT,
+        notify_discord_debt_webhook TEXT,
         notify_facebook TEXT,
         notify_email TEXT,
         updated_at TEXT NOT NULL
@@ -381,7 +495,13 @@ function migrateSettingsAutoIncrementId() {
           'jpy_to_vnd_rate',
           'notify_on_low_stock',
           'notify_on_new_order',
+          'notify_on_purchase',
+          'notify_on_debt',
           'notify_discord_webhook',
+          'notify_discord_sales_webhook',
+          'notify_discord_purchase_webhook',
+          'notify_discord_low_stock_webhook',
+          'notify_discord_debt_webhook',
           'notify_facebook',
           'notify_email',
           'updated_at',
@@ -392,7 +512,13 @@ function migrateSettingsAutoIncrementId() {
           setting.jpy_to_vnd_rate ?? DEFAULT_SETTINGS.jpy_to_vnd_rate,
           setting.notify_on_low_stock ? 1 : 0,
           setting.notify_on_new_order ? 1 : 0,
+          setting.notify_on_purchase ? 1 : 0,
+          setting.notify_on_debt ? 1 : 0,
           setting.notify_discord_webhook ?? null,
+          setting.notify_discord_sales_webhook ?? setting.notify_discord_webhook ?? null,
+          setting.notify_discord_purchase_webhook ?? setting.notify_discord_webhook ?? null,
+          setting.notify_discord_low_stock_webhook ?? setting.notify_discord_webhook ?? null,
+          setting.notify_discord_debt_webhook ?? setting.notify_discord_webhook ?? null,
           setting.notify_facebook ?? null,
           setting.notify_email ?? null,
           setting.updated_at || now(),
@@ -513,9 +639,30 @@ async function init() {
       jpy_to_vnd_rate REAL NOT NULL DEFAULT 170,
       notify_on_low_stock INTEGER NOT NULL DEFAULT 0,
       notify_on_new_order INTEGER NOT NULL DEFAULT 0,
+      notify_on_purchase INTEGER NOT NULL DEFAULT 0,
+      notify_on_debt INTEGER NOT NULL DEFAULT 0,
       notify_discord_webhook TEXT,
+      notify_discord_sales_webhook TEXT,
+      notify_discord_purchase_webhook TEXT,
+      notify_discord_low_stock_webhook TEXT,
+      notify_discord_debt_webhook TEXT,
       notify_facebook TEXT,
       notify_email TEXT,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  _db.run(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      name TEXT NOT NULL,
+      application_id TEXT,
+      access_key TEXT,
+      affiliate_id TEXT,
+      api_key TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
   `);
@@ -539,6 +686,8 @@ async function init() {
   migrateAutoIncrementIds();
   migrateSettingsAutoIncrementId();
   ensureColumn('settings', 'jpy_to_vnd_rate', 'REAL NOT NULL DEFAULT 170');
+  ensureDiscordSettingsColumns();
+  seedDefaultApiKeys();
 
   const existing = queryGet(`SELECT id FROM settings ORDER BY id LIMIT 1`);
   if (!existing) {

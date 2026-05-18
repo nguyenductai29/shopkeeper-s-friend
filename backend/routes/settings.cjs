@@ -5,9 +5,16 @@ const { DEFAULT_SETTINGS, now, saveDb, queryGet, run, boolRow, lastInsertId } = 
 
 const router = express.Router();
 
+function publicSettings(value) {
+  const out = boolRow(value);
+  delete out.notify_email;
+  delete out.notify_facebook;
+  return out;
+}
+
 router.get('/', (req, res) => {
   const raw = queryGet(`SELECT * FROM settings ORDER BY id LIMIT 1`);
-  res.json(boolRow({ ...DEFAULT_SETTINGS, ...raw }));
+  res.json(publicSettings({ ...DEFAULT_SETTINGS, ...raw }));
 });
 
 router.put('/', (req, res) => {
@@ -20,9 +27,13 @@ router.put('/', (req, res) => {
     Number.isFinite(jpyToVndRate) && jpyToVndRate >= 0 ? jpyToVndRate : DEFAULT_SETTINGS.jpy_to_vnd_rate,
     b.notify_on_low_stock ? 1 : 0,
     b.notify_on_new_order ? 1 : 0,
-    b.notify_discord_webhook ?? null,
-    b.notify_facebook ?? null,
-    b.notify_email ?? null,
+    b.notify_on_purchase ? 1 : 0,
+    b.notify_on_debt ? 1 : 0,
+    b.notify_discord_sales_webhook ?? null,
+    b.notify_discord_purchase_webhook ?? null,
+    b.notify_discord_low_stock_webhook ?? null,
+    b.notify_discord_debt_webhook ?? null,
+    b.notify_discord_sales_webhook ?? null,
     updatedAt,
   ];
   const existing = queryGet(`SELECT id FROM settings ORDER BY id LIMIT 1`);
@@ -35,23 +46,28 @@ router.put('/', (req, res) => {
         jpy_to_vnd_rate=?,
         notify_on_low_stock=?,
         notify_on_new_order=?,
+        notify_on_purchase=?,
+        notify_on_debt=?,
+        notify_discord_sales_webhook=?,
+        notify_discord_purchase_webhook=?,
+        notify_discord_low_stock_webhook=?,
+        notify_discord_debt_webhook=?,
         notify_discord_webhook=?,
-        notify_facebook=?,
-        notify_email=?,
         updated_at=?
        WHERE id=?`,
       [...values, existing.id],
     );
   } else {
     run(
-      `INSERT INTO settings (shop_name,currency,jpy_to_vnd_rate,notify_on_low_stock,notify_on_new_order,notify_discord_webhook,notify_facebook,notify_email,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO settings
+        (shop_name,currency,jpy_to_vnd_rate,notify_on_low_stock,notify_on_new_order,notify_on_purchase,notify_on_debt,notify_discord_sales_webhook,notify_discord_purchase_webhook,notify_discord_low_stock_webhook,notify_discord_debt_webhook,notify_discord_webhook,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       values,
     );
     id = lastInsertId();
   }
   saveDb();
-  res.json(boolRow({ ...DEFAULT_SETTINGS, ...b, id, updated_at: updatedAt }));
+  res.json(publicSettings({ ...DEFAULT_SETTINGS, ...b, id, updated_at: updatedAt }));
 });
 
 module.exports = router;

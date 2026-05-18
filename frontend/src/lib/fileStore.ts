@@ -28,7 +28,8 @@ export type ProductLookupResult = {
 };
 
 export type NotificationSendResult = {
-  channel: 'discord' | 'email' | 'facebook';
+  channel: 'sales' | 'purchases' | 'low_stock' | 'debts' | string;
+  label?: string;
   sent?: boolean;
   skipped?: boolean;
   reason?: string;
