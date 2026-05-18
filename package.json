@@ -12,6 +12,7 @@
     "build": "npm run build:frontend",
     "build:frontend": "cd frontend && vite build",
     "dist:win": "npm run build && electron-builder --win nsis",
+    "dist:win:embed-icon": "npm run build && electron-builder --win nsis -c.win.signAndEditExecutable=true",
     "dist:win:dir": "npm run build && electron-builder --win dir",
     "dist:mac": "npm run build && electron-builder --mac dmg zip",
     "dist:mac:arm64": "npm run build && electron-builder --mac dmg zip --arm64",
@@ -34,6 +35,10 @@
       {
         "from": "frontend/dist",
         "to": "frontend/dist"
+      },
+      {
+        "from": "frontend/public/imo_kome_authentic_logo.ico",
+        "to": "assets/imo_kome_authentic_logo.ico"
       }
     ],
     "asar": true,
@@ -43,7 +48,7 @@
       ],
       "icon": "frontend/public/imo_kome_authentic_logo.ico",
       "artifactName": "${productName}-${version}-Setup.${ext}",
-      "signAndEditExecutable": true
+      "signAndEditExecutable": false
     },
     "mac": {
       "target": [
@@ -63,6 +68,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": "always",
       "shortcutName": "ShopFlow",
+      "include": "build/installer.nsh",
       "installerIcon": "frontend/public/imo_kome_authentic_logo.ico",
       "uninstallerIcon": "frontend/public/imo_kome_authentic_logo.ico"
     }
