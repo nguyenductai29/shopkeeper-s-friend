@@ -14,21 +14,24 @@ const APP_DATA_DIR_NAME = 'ShopFlow'
 const LEGACY_WIN_DATA_DIR_NAME = "Shopkeeper's Friend"
 const LEGACY_UNIX_DATA_DIR_NAME = 'shopkeeper-s-friend'
 
-function loadEnv() {
-  const envPath = isDev
-    ? path.join(__dirname, '..', '.env')
-    : path.join(path.dirname(process.execPath), '.env')
+function loadEnvFile(envPath, override = false) {
   try {
     const content = fs.readFileSync(envPath, 'utf-8')
     for (const line of content.split(/\r?\n/)) {
       const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/)
-      if (m && process.env[m[1]] === undefined) {
+      if (m && (override || process.env[m[1]] === undefined)) {
         process.env[m[1]] = m[2].trim()
       }
     }
   } catch {
-    // .env is optional
+    // env files are optional
   }
+}
+
+function loadEnv() {
+  const envDir = isDev ? path.join(__dirname, '..') : path.dirname(process.execPath)
+  loadEnvFile(path.join(envDir, '.env'))
+  loadEnvFile(path.join(envDir, '.env.local'), true)
 }
 
 function getDefaultDataDir() {

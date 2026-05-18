@@ -2,62 +2,18 @@
 
 const express = require('express');
 const cheerio = require('cheerio');
+const { now, queryGet, run, saveDb } = require('../db.cjs');
 const { localizeProductName } = require('../productNameVi.cjs');
 
 const router = express.Router();
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-const LOOKUP_TIMEOUT_MS = 8000;
+const LOOKUP_TIMEOUT_MS = 4500;
 const IMAGE_TIMEOUT_MS = 12000;
-const DIRECT_STORE_SEARCH_TARGETS = [
-  {
-    source: 'Amazon Japan',
-    searchUrl: (code) => `https://www.amazon.co.jp/s?k=${encodeURIComponent(code)}`,
-    hostPattern: /(^|\.)amazon\.co\.jp$/,
-    detailPatterns: [/\/dp\//, /\/gp\/product\//],
-  },
-  {
-    source: 'Rakuten Books',
-    searchUrl: (code) => `https://search.books.rakuten.co.jp/bksearch/nm?g=000&sitem=${encodeURIComponent(code)}`,
-    hostPattern: /(^|\.)books\.rakuten\.co\.jp$/,
-    detailPatterns: [/\/rb\/\d+/],
-    strictCodeMatch: true,
-  },
-  {
-    source: 'Rakuten',
-    searchUrl: (code) => `https://search.rakuten.co.jp/search/mall/${encodeURIComponent(code)}/`,
-    hostPattern: /(^|\.)rakuten\.co\.jp$/,
-    detailPatterns: [/item\.rakuten\.co\.jp\/[^/]+\/[^/?#]+/],
-  },
-  {
-    source: 'Yahoo Shopping',
-    searchUrl: (code) => `https://shopping.yahoo.co.jp/search?p=${encodeURIComponent(code)}`,
-    hostPattern: /(^|\.)shopping\.yahoo\.co\.jp$|(^|\.)store\.shopping\.yahoo\.co\.jp$/,
-    detailPatterns: [/store\.shopping\.yahoo\.co\.jp\/[^/]+\/[^/?#]+/],
-  },
-  {
-    source: 'Yodobashi',
-    searchUrl: (code) => `https://www.yodobashi.com/?word=${encodeURIComponent(code)}`,
-    hostPattern: /(^|\.)yodobashi\.com$/,
-    detailPatterns: [/\/product\//],
-  },
-  {
-    source: 'BicCamera',
-    searchUrl: (code) => `https://www.biccamera.com/bc/category/?q=${encodeURIComponent(code)}`,
-    hostPattern: /(^|\.)biccamera\.com$/,
-    detailPatterns: [/\/bc\/item\//],
-  },
-];
-const SHOPPING_SEARCH_TARGETS = [
-  { source: 'Amazon Japan', domain: 'amazon.co.jp', hostPattern: /(^|\.)amazon\.co\.jp$/ },
-  { source: 'Rakuten Books', domain: 'books.rakuten.co.jp', hostPattern: /(^|\.)books\.rakuten\.co\.jp$/ },
-  { source: 'Rakuten', domain: 'item.rakuten.co.jp', hostPattern: /(^|\.)rakuten\.co\.jp$/ },
-  { source: 'Yahoo Shopping', domain: 'shopping.yahoo.co.jp', hostPattern: /(^|\.)shopping\.yahoo\.co\.jp$/ },
-  { source: 'Yahoo Store', domain: 'store.shopping.yahoo.co.jp', hostPattern: /(^|\.)store\.shopping\.yahoo\.co\.jp$/ },
-  { source: 'Yodobashi', domain: 'yodobashi.com', hostPattern: /(^|\.)yodobashi\.com$/ },
-  { source: 'BicCamera', domain: 'biccamera.com', hostPattern: /(^|\.)biccamera\.com$/ },
-  { source: 'LOHACO', domain: 'lohaco.yahoo.co.jp', hostPattern: /(^|\.)lohaco\.yahoo\.co\.jp$/ },
-];
+const FOUND_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const PARTIAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const YAHOO_SHOPPING_API_URL = 'https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch';
+const DEFAULT_YAHOO_JP_APP_ID = 'dmVyPTIwMjUwNyZpZD1tQ3p1WlhLYW82Jmhhc2g9TldabU1tVTNNbUkyWlRaa1pUazBNQQ';
 
 function pickFirst(...values) {
   return values.find((value) => typeof value === 'string' && value.trim())?.trim() || null;
@@ -89,6 +45,127 @@ function normalizeLookupResult(result) {
     image_url: imageUrls[0] || null,
     image_urls: imageUrls,
   };
+}
+
+function normalizeLookupMode(value) {
+  return String(value || '').toLowerCase() === 'deep' ? 'deep' : 'fast';
+}
+
+function isCompleteLookup(result) {
+  return !!(result?.found && result.name && Array.isArray(result.image_urls) && result.image_urls.length > 0);
+}
+
+function mergeLookupResults(code, results) {
+  const normalizedResults = results.map(normalizeLookupResult).filter(Boolean);
+  if (!normalizedResults.length) return { code, found: false };
+
+  const imageUrls = uniqueStrings(normalizedResults.flatMap((result) => result.image_urls || []));
+  const primary = normalizedResults.find((result) => result.name && result.image_urls?.length)
+    || normalizedResults.find((result) => result.name)
+    || normalizedResults.find((result) => result.image_urls?.length)
+    || normalizedResults[0];
+  const sources = uniqueStrings(normalizedResults.map((result) => result.source).filter(Boolean));
+
+  return {
+    code,
+    found: true,
+    source: sources.join(', '),
+    name: primary.name,
+    original_name: primary.original_name || primary.name || null,
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
+  };
+}
+
+function parseCacheImageUrls(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function cacheMaxAgeMs(row, mode) {
+  if (mode === 'deep' && !row.image_url) return 0;
+  if (row.name && row.image_url) return FOUND_CACHE_TTL_MS;
+  return PARTIAL_CACHE_TTL_MS;
+}
+
+function hasLegacyCrawlSource(source) {
+  return /Amazon Japan|Rakuten|Yahoo Store|Yahoo Shopping(?! API)|Web search/i.test(String(source || ''));
+}
+
+function cachedLookup(code, mode) {
+  const row = queryGet(
+    `SELECT * FROM product_lookup_cache WHERE LOWER(code) = LOWER(?)`,
+    [code],
+  );
+  if (!row?.updated_at) return null;
+  if (row.found && hasLegacyCrawlSource(row.source)) return null;
+
+  if (!row.found) {
+    return null;
+  }
+
+  const result = normalizeLookupResult({
+    code,
+    found: true,
+    name: row.name,
+    original_name: row.original_name,
+    image_url: row.image_url,
+    image_urls: parseCacheImageUrls(row.image_urls),
+    source: row.source,
+  });
+
+  if (!result) return null;
+  if (row.image_url && !result.image_url) return null;
+
+  const ageMs = Date.now() - Date.parse(row.updated_at);
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > cacheMaxAgeMs(result, mode)) return null;
+
+  return { ...result, code, cached: true };
+}
+
+function saveLookupCache(code, result, mode) {
+  if (!result?.found) return;
+  const timestamp = now();
+  const normalized = normalizeLookupResult({ ...result, code });
+  if (!normalized?.found) return;
+  run(
+    `INSERT INTO product_lookup_cache
+      (code, found, name, original_name, image_url, image_urls, source, mode, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(code) DO UPDATE SET
+      found=excluded.found,
+      name=excluded.name,
+      original_name=excluded.original_name,
+      image_url=excluded.image_url,
+      image_urls=excluded.image_urls,
+      source=excluded.source,
+      mode=excluded.mode,
+      updated_at=excluded.updated_at`,
+    [
+      code,
+      1,
+      normalized?.name || null,
+      normalized?.original_name || null,
+      normalized?.image_url || null,
+      JSON.stringify(normalized?.image_urls || []),
+      normalized?.source || result?.source || null,
+      mode,
+      timestamp,
+      timestamp,
+    ],
+  );
+  saveDb();
+}
+
+async function collectProviderResults(providers) {
+  const results = await Promise.all(
+    providers.map((provider) => provider().then(normalizeLookupResult).catch(() => null)),
+  );
+  return results.filter(Boolean);
 }
 
 async function fetchJson(url, headers = {}) {
@@ -163,9 +240,13 @@ function decodeEmbeddedString(value) {
 function cleanUrlCandidate(value) {
   const decoded = decodeEmbeddedString(value);
   if (!decoded) return null;
-  return decoded
+  const cleaned = decoded
     .replace(/&amp;/g, '&')
     .replace(/[)\],};]+$/g, '')
+    .trim();
+  return cleaned
+    .replace(/(?:%22|%27|["'<>\s]).*$/i, '')
+    .replace(/(?:\\n|\/n).*$/i, '')
     .trim();
 }
 
@@ -261,9 +342,10 @@ function srcsetUrls(value) {
 function isLikelyImageUrl(value) {
   const raw = cleanUrlCandidate(value);
   if (!raw || !/^https?:\/\//i.test(raw)) return false;
-  if (/sprite|logo|favicon|placeholder|spacer|tracking|analytics|pixel/i.test(raw)) return false;
+  if (/%22|%27|%3c|%3e|\\|\{|\}|\/n/i.test(raw)) return false;
+  if (/sprite|logo|favicon|placeholder|spacer|tracking|analytics|pixel|transparent[-_]?1x1|loading|spinner|preloader|progress|snake/i.test(raw)) return false;
   if (/no[-_]?image|no[-_]?photo|image[-_]?not[-_]?available|not[-_]?available|now[-_]?printing/i.test(raw)) return false;
-  if (/\.(css|js)(\?|#|$)/i.test(raw)) return false;
+  if (/\.(css|js|mjs|map|woff2?|ttf|otf|eot|html?|mp4|webm|json)(?:[?#"%]|$)/i.test(raw)) return false;
 
   let parsed;
   try {
@@ -274,6 +356,12 @@ function isLikelyImageUrl(value) {
 
   const fingerprint = `${parsed.hostname}${parsed.pathname}${parsed.search}`.toLowerCase();
   if (parsed.hostname === 'r.r10s.jp') return false;
+  if (
+    /(^|\.)media-amazon\.com$/i.test(parsed.hostname)
+    || /(^|\.)ssl-images-amazon\.com$/i.test(parsed.hostname)
+  ) {
+    if (!/\/images\/i\//i.test(parsed.pathname)) return false;
+  }
   if (/\/(?:common|header|footer|assets|resources|bookmark|ranking|campaign|event|banner|bnr|spux|button|btn|icon|logo|cart|mypage|point|crown|free[_-]?shipping)\//i.test(parsed.pathname)) {
     return false;
   }
@@ -284,7 +372,7 @@ function isLikelyImageUrl(value) {
   return /m\.media-amazon\.com\/images\/i\//i.test(fingerprint)
     || /thumbnail\.image\.rakuten\.co\.jp/i.test(fingerprint)
     || /image\.rakuten\.co\.jp/i.test(fingerprint)
-    || /item-shopping\.c\.yimg\.jp\/i\/j\//i.test(fingerprint)
+    || /item-shopping\.c\.yimg\.jp\/i\/[a-z]\//i.test(fingerprint)
     || /shopping\.cdn\.yimg\.jp/i.test(fingerprint)
     || /image\.yodobashi\.com/i.test(fingerprint)
     || /image\.biccamera\.com/i.test(fingerprint)
@@ -505,6 +593,63 @@ function normalizeBarcodeFinderProduct(data) {
   };
 }
 
+function normalizeYahooShoppingProduct(data, code) {
+  const hits = Array.isArray(data?.hits) ? data.hits : [];
+  if (!hits.length) return null;
+
+  const variants = barcodeVariants(code);
+  const matchedHits = hits.filter((hit) => {
+    const janCode = String(hit?.janCode || '').trim();
+    return !janCode || variants.includes(janCode);
+  });
+  const usableHits = matchedHits.length ? matchedHits : hits;
+  const results = usableHits
+    .map((hit) => {
+      const name = pickFirst(
+        hit?.name,
+        hit?.headLine,
+        hit?.brand?.name,
+        hit?.description,
+      );
+      const imageUrls = uniqueStrings([
+        hit?.exImage?.url,
+        hit?.image?.medium,
+        hit?.image?.small,
+      ].filter(isLikelyImageUrl));
+      if (!name && !imageUrls.length) return null;
+      return {
+        found: true,
+        source: 'Yahoo Shopping API',
+        name,
+        original_name: name,
+        image_url: imageUrls[0] || null,
+        image_urls: imageUrls,
+      };
+    })
+    .filter(Boolean);
+
+  if (!results.length) return null;
+
+  const imageUrls = uniqueStrings(results.flatMap((result) => result.image_urls || []));
+  const primary = results.find((result) => result.name && result.image_urls?.length)
+    || results.find((result) => result.name)
+    || results[0];
+
+  return {
+    found: true,
+    source: 'Yahoo Shopping API',
+    name: primary.name || null,
+    original_name: primary.original_name || primary.name || null,
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
+  };
+}
+
+async function fetchYahooShopping(params) {
+  const data = await fetchJson(`${YAHOO_SHOPPING_API_URL}?${params.toString()}`);
+  return data;
+}
+
 function cleanProductName(value) {
   return String(value || '')
     .replace(/\s*[|-]\s*(公式通販|DAISO.*|ダイソーネットストア.*|Daiso.*)$/i, '')
@@ -600,40 +745,6 @@ async function lookupProductPage(url, source) {
   return extractProductFromHtml(html, url, source, { requireName: true });
 }
 
-function unwrapDuckDuckGoUrl(href) {
-  const decodedHref = decodeHtml(href);
-  try {
-    const url = new URL(decodedHref, 'https://duckduckgo.com');
-    const wrapped = url.searchParams.get('uddg');
-    return wrapped ? decodeURIComponent(wrapped) : url.toString();
-  } catch {
-    return null;
-  }
-}
-
-function extractDuckDuckGoResultUrls(html, code, options = {}) {
-  const urls = [];
-  const regex = /<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let match;
-  const matches = [];
-  while ((match = regex.exec(html))) matches.push(match);
-
-  for (let index = 0; index < matches.length; index += 1) {
-    const current = matches[index];
-    const next = matches[index + 1];
-    const url = unwrapDuckDuckGoUrl(current[1]);
-    if (!url) continue;
-    const host = hostname(url);
-    if (options.hostPattern && (!host || !options.hostPattern.test(host))) continue;
-    const block = html.slice(current.index, next?.index || Math.min(html.length, current.index + 2500));
-    const text = decodeHtml(block) || '';
-    if (!url.includes(code) && !text.includes(code)) continue;
-    if (/\.(pdf|zip|jpg|jpeg|png|webp)(\?|#|$)/i.test(url)) continue;
-    urls.push(url);
-  }
-  return uniqueStrings(urls).slice(0, options.limit || 6);
-}
-
 async function lookupDaiso(code) {
   const urls = [
     ['https://jp.daisonet.com/products/', 'Daiso Japan'],
@@ -641,9 +752,16 @@ async function lookupDaiso(code) {
     ['https://shop.daiso.com.tw/products/', 'Daiso Taiwan'],
   ];
 
+  const results = await Promise.all(
+    urls.map(([baseUrl, source]) => (
+      lookupProductPage(`${baseUrl}${encodeURIComponent(code)}`, source)
+        .then(normalizeLookupResult)
+        .catch(() => null)
+    )),
+  );
+
   let fallback = null;
-  for (const [baseUrl, source] of urls) {
-    const result = normalizeLookupResult(await lookupProductPage(`${baseUrl}${encodeURIComponent(code)}`, source));
+  for (const result of results.filter(Boolean)) {
     if (!result?.found) continue;
     if (result.image_urls?.length) return result;
     fallback ||= result;
@@ -661,171 +779,27 @@ async function lookupBarcodeFinder(code) {
   return normalizeBarcodeFinderProduct(data);
 }
 
-async function lookupDuckDuckGo(code) {
-  const html = await fetchText(`https://duckduckgo.com/html/?q=${encodeURIComponent(`"${code}" product`)}`);
-  if (!html) return null;
+async function lookupYahooShopping(code) {
+  const appId = process.env.YAHOO_JP_APP_ID || process.env.YAHOO_SHOPPING_APP_ID || DEFAULT_YAHOO_JP_APP_ID;
+  if (!appId) return null;
 
-  let fallback = null;
-  for (const url of extractDuckDuckGoResultUrls(html, code)) {
-    const result = normalizeLookupResult(await lookupProductPage(url, hostname(url) || 'Web search'));
-    if (!result?.found) continue;
-    if (result.image_urls?.length) return result;
-    fallback ||= result;
-  }
-
-  return fallback;
-}
-
-function unwrapStoreUrl(rawUrl, baseUrl) {
-  const absolute = absoluteUrl(rawUrl, baseUrl);
-  if (!absolute) return null;
-  try {
-    const url = new URL(absolute);
-    const wrapped = url.searchParams.get('url') || url.searchParams.get('u');
-    if (wrapped && /^https?:\/\//i.test(wrapped)) return wrapped;
-    if (wrapped && wrapped.startsWith('/')) return new URL(wrapped, url.origin).toString();
-    return url.toString();
-  } catch {
-    return absolute;
-  }
-}
-
-function canonicalProductUrl(rawUrl) {
-  if (!rawUrl) return null;
-  try {
-    const url = new URL(rawUrl);
-    const amazonMatch = url.pathname.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
-    if (/amazon\.co\.jp$/i.test(url.hostname) && amazonMatch) {
-      return `https://www.amazon.co.jp/dp/${amazonMatch[1]}`;
-    }
-
-    url.hash = '';
-    const keepParams = new URLSearchParams();
-    url.search = keepParams.toString();
-    return url.toString();
-  } catch {
-    return rawUrl;
-  }
-}
-
-function extractStoreDetailUrls(html, baseUrl, target) {
-  const $ = cheerio.load(html);
-  const urls = [];
-
-  $('a[href]').each((_index, element) => {
-    const rawUrl = unwrapStoreUrl($(element).attr('href'), baseUrl);
-    const url = canonicalProductUrl(rawUrl);
-    if (!url) return;
-
-    const host = hostname(url);
-    if (!host || !target.hostPattern.test(host)) return;
-    if (/\.(pdf|zip|jpg|jpeg|png|webp|gif|svg)(\?|#|$)/i.test(url)) return;
-    if (!target.detailPatterns.some((pattern) => pattern.test(url))) return;
-    urls.push(url);
+  const params = new URLSearchParams({
+    appid: appId,
+    jan_code: code,
+    image_size: '600',
+    results: '5',
   });
+  const janResult = normalizeYahooShoppingProduct(await fetchYahooShopping(params), code);
+  if (janResult?.found) return janResult;
 
-  return uniqueStrings(urls).slice(0, 4);
+  params.delete('jan_code');
+  params.set('query', code);
+  return normalizeYahooShoppingProduct(await fetchYahooShopping(params), code);
 }
 
 function barcodeVariants(code) {
   const raw = String(code || '').trim();
   return uniqueStrings([raw, raw.replace(/^0+/, '')].filter(Boolean));
-}
-
-function resultMatchesBarcode(result, code) {
-  if (!result?.found) return false;
-  const text = [
-    result.name,
-    result.original_name,
-    result.image_url,
-    ...(Array.isArray(result.image_urls) ? result.image_urls : []),
-  ].join(' ');
-  return barcodeVariants(code).some((variant) => variant && text.includes(variant));
-}
-
-async function lookupStoreSearchTarget(code, target) {
-  const searchUrl = target.searchUrl(code);
-  const html = await fetchText(searchUrl);
-  if (!html) return null;
-
-  let searchResult = normalizeLookupResult(
-    extractProductFromHtml(html, searchUrl, target.source, { code }),
-  );
-  if (target.strictCodeMatch && !resultMatchesBarcode(searchResult, code)) {
-    searchResult = null;
-  }
-  const detailUrls = extractStoreDetailUrls(html, searchUrl, target);
-  const detailResults = await Promise.all(
-    detailUrls.map((url) => lookupProductPage(url, target.source).catch(() => null)),
-  );
-  const results = [
-    searchResult,
-    ...detailResults.map(normalizeLookupResult),
-  ].filter((result) => result && (!target.strictCodeMatch || resultMatchesBarcode(result, code)));
-
-  if (!results.length) return null;
-
-  const imageUrls = uniqueStrings(results.flatMap((result) => result.image_urls || []));
-  const primary = results.find((result) => result.name && result.image_urls?.length)
-    || results.find((result) => result.name)
-    || results.find((result) => result.image_urls?.length)
-    || results[0];
-  if (!primary?.name && !imageUrls.length) return null;
-
-  return {
-    found: true,
-    source: target.source,
-    name: primary.name || null,
-    image_url: imageUrls[0] || null,
-    image_urls: imageUrls,
-  };
-}
-
-async function lookupDirectStoreSearch(code) {
-  const results = await Promise.all(
-    DIRECT_STORE_SEARCH_TARGETS.map((target) => lookupStoreSearchTarget(code, target).catch(() => null)),
-  );
-
-  let fallback = null;
-  for (const result of results.map(normalizeLookupResult).filter(Boolean)) {
-    if (result.image_urls?.length && result.name) return result;
-    if (result.image_urls?.length) fallback ||= result;
-    fallback ||= result;
-  }
-
-  return fallback;
-}
-
-async function lookupShoppingSearch(code) {
-  const searches = await Promise.all(
-    SHOPPING_SEARCH_TARGETS.map(async (target) => {
-      const query = `"${code}" site:${target.domain}`;
-      const html = await fetchText(`https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`);
-      if (!html) return [];
-      return extractDuckDuckGoResultUrls(html, code, {
-        hostPattern: target.hostPattern,
-        limit: 3,
-      }).map((url) => ({ url, source: target.source }));
-    }),
-  );
-
-  const candidates = [];
-  const seen = new Set();
-  for (const result of searches.flat()) {
-    if (seen.has(result.url)) continue;
-    seen.add(result.url);
-    candidates.push(result);
-  }
-
-  let fallback = null;
-  for (const candidate of candidates.slice(0, 12)) {
-    const result = normalizeLookupResult(await lookupProductPage(candidate.url, candidate.source));
-    if (!result?.found) continue;
-    if (result.image_urls?.length) return result;
-    fallback ||= result;
-  }
-
-  return fallback;
 }
 
 async function lookupOpenFacts(baseUrl, code, source) {
@@ -849,50 +823,47 @@ async function lookupUpcItemDb(code) {
   return normalizeUpcItemDbProduct(data);
 }
 
+async function lookupOnline(code, mode) {
+  const results = [];
+  const stages = [
+    [
+      () => lookupYahooShopping(code),
+      () => lookupOpenFacts('https://world.openfoodfacts.org', code, 'Open Food Facts'),
+      () => lookupOpenFacts('https://world.openproductsfacts.org', code, 'Open Products Facts'),
+      () => lookupOpenFacts('https://world.openbeautyfacts.org', code, 'Open Beauty Facts'),
+      () => lookupOpenFacts('https://world.openpetfoodfacts.org', code, 'Open Pet Food Facts'),
+      () => lookupUpcItemDb(code),
+      () => lookupBarcodeFinder(code),
+      () => lookupDaiso(code),
+    ],
+  ];
+
+  for (const stage of stages) {
+    results.push(...await collectProviderResults(stage));
+    const merged = mergeLookupResults(code, results);
+    if (isCompleteLookup(merged)) return merged;
+  }
+
+  return mergeLookupResults(code, results);
+}
+
 router.get('/image', proxyImage);
 
 router.get('/:code', async (req, res) => {
   const code = String(req.params.code || '').trim();
   if (!code) return res.status(400).json({ found: false, error: 'missing_code' });
+  const mode = normalizeLookupMode(req.query.mode);
+  const refresh = String(req.query.refresh || '') === '1' || String(req.query.refresh || '').toLowerCase() === 'true';
 
-  const providers = [
-    () => lookupOpenFacts('https://world.openfoodfacts.org', code, 'Open Food Facts'),
-    () => lookupOpenFacts('https://world.openproductsfacts.org', code, 'Open Products Facts'),
-    () => lookupOpenFacts('https://world.openbeautyfacts.org', code, 'Open Beauty Facts'),
-    () => lookupOpenFacts('https://world.openpetfoodfacts.org', code, 'Open Pet Food Facts'),
-    () => lookupUpcItemDb(code),
-    () => lookupBarcodeFinder(code),
-    () => lookupDaiso(code),
-    () => lookupDirectStoreSearch(code),
-    () => lookupShoppingSearch(code),
-    () => lookupDuckDuckGo(code),
-  ];
-
-  const results = [];
-  for (const provider of providers) {
-    const result = normalizeLookupResult(await provider().catch(() => null));
-    if (!result?.found) continue;
-    results.push(result);
+  if (!refresh) {
+    const cached = cachedLookup(code, mode);
+    if (cached) return res.json(cached);
   }
 
-  if (results.length > 0) {
-    const imageUrls = uniqueStrings(results.flatMap((result) => result.image_urls || []));
-    const primary = results.find((result) => result.name && result.image_urls?.length)
-      || results.find((result) => result.name)
-      || results.find((result) => result.image_urls?.length)
-      || results[0];
-    const sources = uniqueStrings(results.map((result) => result.source).filter(Boolean));
-    return res.json({
-      code,
-      found: true,
-      source: sources.join(', '),
-      name: primary.name,
-      image_url: imageUrls[0] || null,
-      image_urls: imageUrls,
-    });
-  }
+  const result = await lookupOnline(code, mode);
+  saveLookupCache(code, result, mode);
 
-  res.json({ code, found: false });
+  res.json(result);
 });
 
 module.exports = router;

@@ -66,13 +66,18 @@ function formatDateTime(value: string) {
 
 async function firstLoadableImageUrl(values: Array<string | null | undefined>) {
   const seen = new Set<string>();
+  const urls: string[] = [];
   for (const value of values) {
     const url = String(value || "").trim();
     if (!url || seen.has(url)) continue;
     seen.add(url);
-    if (await canLoadImageUrl(url)) return url;
+    urls.push(url);
   }
-  return "";
+  if (urls.length === 0) return "";
+
+  const candidates = urls.slice(0, 8);
+  const results = await Promise.all(candidates.map((url) => canLoadImageUrl(url, 3500)));
+  return candidates.find((_url, index) => results[index]) || "";
 }
 
 function looksUntranslatedProductName(value: string | null | undefined) {
@@ -154,20 +159,24 @@ function ImportPageInner() {
   const lookupOnlineForRow = async (
     row: Pick<Row, "key" | "code" | "name" | "image_url">,
     existingProductInput?: Product | null,
+    options: { mode?: "fast" | "deep"; refresh?: boolean } = {},
   ) => {
     const code = row.code.trim();
     if (!code) return;
+    const mode = options.mode || "fast";
 
     updateRow(row.key, {
       lookup_status: "loading",
-      lookup_message: row.image_url ? "Đang tìm ảnh tốt hơn..." : "Đang tìm online...",
+      lookup_message: mode === "deep"
+        ? "Đang tìm sâu online..."
+        : (row.image_url ? "Đang tìm ảnh tốt hơn..." : "Đang tìm nhanh online..."),
     });
 
     try {
       const existingProduct = existingProductInput === undefined
         ? await productsStore.findByCode(code)
         : existingProductInput;
-      const result = await productLookupStore.byBarcode(code);
+      const result = await productLookupStore.byBarcode(code, { mode, refresh: options.refresh });
       if (result.found) {
         const imageUrl = await firstLoadableImageUrl([
           ...(result.image_urls || []),
@@ -181,8 +190,8 @@ function ImportPageInner() {
           image_url: imageUrl || row.image_url,
           lookup_status: "found",
           lookup_message: imageUrl
-            ? (result.source ? `Tìm thấy ảnh: ${result.source}` : "Tìm thấy ảnh online")
-            : (result.source ? `Tìm thấy tên: ${result.source}` : "Tìm thấy tên, chưa có ảnh"),
+            ? (result.cached ? "Tìm thấy ảnh từ cache" : (result.source ? `Tìm thấy ảnh: ${result.source}` : "Tìm thấy ảnh online"))
+            : (result.cached ? "Tìm thấy tên từ cache" : (result.source ? `Tìm thấy tên: ${result.source}` : "Tìm thấy tên, chưa có ảnh")),
         });
       } else {
         updateRow(row.key, {
@@ -358,7 +367,7 @@ function ImportPageInner() {
 
       let updated = 0;
       for (const product of targets) {
-        const result = await productLookupStore.byBarcode(product.code);
+        const result = await productLookupStore.byBarcode(product.code, { mode: "deep", refresh: true });
         const imageUrl = await firstLoadableImageUrl([
           ...(result.image_urls || []),
           result.image_url,
@@ -522,7 +531,7 @@ function ImportPageInner() {
                             size="sm"
                             variant="ghost"
                             className="h-7 justify-start px-1.5 text-xs"
-                            onClick={() => lookupOnlineForRow(row)}
+                            onClick={() => lookupOnlineForRow(row, undefined, { mode: "deep", refresh: true })}
                           >
                             <RefreshCw className="mr-1 h-3 w-3" /> Thử lại
                           </Button>

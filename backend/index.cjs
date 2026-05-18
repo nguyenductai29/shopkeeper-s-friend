@@ -3,6 +3,10 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { loadEnv } = require('./env.cjs');
+
+loadEnv();
+
 const { init, DATA_DIR } = require('./db.cjs');
 
 const app = express();

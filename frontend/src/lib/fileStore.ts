@@ -24,6 +24,7 @@ export type ProductLookupResult = {
   image_url?: string | null;
   image_urls?: string[] | null;
   source?: string | null;
+  cached?: boolean;
 };
 
 export type NotificationSendResult = {
@@ -69,7 +70,9 @@ export function imageProxyUrl(url: string | null | undefined): string {
 
 export function isPlaceholderImageUrl(url: string | null | undefined): boolean {
   const value = String(url || '').trim();
-  return /no[-_]?image|no[-_]?photo|image[-_]?not[-_]?available|not[-_]?available|now[-_]?printing|placeholder/i.test(value);
+  return /no[-_]?image|no[-_]?photo|image[-_]?not[-_]?available|not[-_]?available|now[-_]?printing|placeholder|loading|spinner|preloader|progress|snake|transparent[-_]?1x1|sprite|spacer|pixel|favicon|logo/i.test(value)
+    || /\.(css|js|mjs|map|woff2?|ttf|otf|eot|html?|mp4|webm|json)(?:[?#"%]|$)/i.test(value)
+    || /%22|%27|%3c|%3e|\\|\{|\}|\/n/i.test(value);
 }
 
 export async function canLoadImageUrl(url: string | null | undefined, timeoutMs = 6000): Promise<boolean> {
@@ -144,8 +147,15 @@ export const productsStore = {
 
 // ===== Online product lookup =====
 export const productLookupStore = {
-  async byBarcode(code: string): Promise<ProductLookupResult> {
-    return apiFetch<ProductLookupResult>(`/product-lookup/${encodeURIComponent(code)}`);
+  async byBarcode(
+    code: string,
+    options: { mode?: 'fast' | 'deep'; refresh?: boolean } = {},
+  ): Promise<ProductLookupResult> {
+    const params = new URLSearchParams();
+    if (options.mode) params.set('mode', options.mode);
+    if (options.refresh) params.set('refresh', '1');
+    const query = params.toString();
+    return apiFetch<ProductLookupResult>(`/product-lookup/${encodeURIComponent(code)}${query ? `?${query}` : ''}`);
   },
 };
 

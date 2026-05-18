@@ -520,6 +520,22 @@ async function init() {
     )
   `);
 
+  _db.run(`
+    CREATE TABLE IF NOT EXISTS product_lookup_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      found INTEGER NOT NULL DEFAULT 0,
+      name TEXT,
+      original_name TEXT,
+      image_url TEXT,
+      image_urls TEXT,
+      source TEXT,
+      mode TEXT NOT NULL DEFAULT 'fast',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
   migrateAutoIncrementIds();
   migrateSettingsAutoIncrementId();
   ensureColumn('settings', 'jpy_to_vnd_rate', 'REAL NOT NULL DEFAULT 170');
