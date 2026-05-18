@@ -14,7 +14,7 @@ export type {
 import type { Product, Purchase, Order, OrderItem, InvoiceTemplate, AppSettings, EntityId } from './localStore';
 
 const BASE = '/api';
-export const SETTINGS_UPDATED_EVENT = 'shopkeeper:settings-updated';
+export const SETTINGS_UPDATED_EVENT = 'shopflow:settings-updated';
 
 export type ProductLookupResult = {
   code: string;

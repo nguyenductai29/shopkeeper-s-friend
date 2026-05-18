@@ -153,9 +153,9 @@ async function notifyLowStock(product) {
 
 async function sendTestNotification() {
   const settings = getSettings();
-  const subject = 'Shopkeeper notification test';
+  const subject = 'ShopFlow notification test';
   const message = [
-    'Kiểm tra thông báo từ Shopkeeper.',
+    'Kiểm tra thông báo từ ShopFlow.',
     settings.shop_name ? `Shop: ${settings.shop_name}` : null,
     `Thời gian: ${new Date().toLocaleString('vi-VN')}`,
   ].filter(Boolean).join('\n');

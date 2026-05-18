@@ -4,14 +4,26 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
+const APP_DATA_DIR_NAME = 'ShopFlow';
+const LEGACY_WIN_DATA_DIR_NAME = "Shopkeeper's Friend";
+const LEGACY_UNIX_DATA_DIR_NAME = 'shopkeeper-s-friend';
+
+function getLegacyDataDir() {
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    return path.join(base, LEGACY_WIN_DATA_DIR_NAME);
+  }
+  return path.join(os.homedir(), '.local', 'share', LEGACY_UNIX_DATA_DIR_NAME);
+}
+
 function getDataDir() {
   const envVal = process.env.ELECTRON_DATA_DIR;
   if (envVal && envVal.trim()) return envVal.trim();
   if (process.platform === 'win32') {
     const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
-    return path.join(base, "Shopkeeper's Friend");
+    return path.join(base, APP_DATA_DIR_NAME);
   }
-  return path.join(os.homedir(), '.local', 'share', 'shopkeeper-s-friend');
+  return path.join(os.homedir(), '.local', 'share', APP_DATA_DIR_NAME);
 }
 
 const DATA_DIR = getDataDir();
@@ -398,6 +410,13 @@ function migrateSettingsAutoIncrementId() {
 }
 
 async function init() {
+  const legacyDir = getLegacyDataDir();
+  if (!fs.existsSync(DATA_DIR) && fs.existsSync(legacyDir)) {
+    fs.mkdirSync(path.dirname(DATA_DIR), { recursive: true });
+    fs.cpSync(legacyDir, DATA_DIR, { recursive: true });
+    console.log(`[init] Migrated legacy data directory to: ${DATA_DIR}`);
+  }
+
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     console.log(`[init] Created data directory: ${DATA_DIR}`);

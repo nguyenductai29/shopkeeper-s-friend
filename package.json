@@ -1,6 +1,6 @@
 {
-  "name": "shopkeeper-s-friend",
-  "version": "1.0.0",
+  "name": "shopflow",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -19,8 +19,8 @@
     "dist:mac:dir": "npm run build && electron-builder --mac dir"
   },
   "build": {
-    "appId": "com.shopkeeper.friend",
-    "productName": "Shopkeeper's Friend",
+    "appId": "com.shopflow.app",
+    "productName": "ShopFlow",
     "directories": {
       "output": "release"
     },
@@ -43,7 +43,7 @@
       ],
       "icon": "frontend/public/imo_kome_authentic_logo.ico",
       "artifactName": "${productName}-${version}-Setup.${ext}",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true
     },
     "mac": {
       "target": [
@@ -60,7 +60,11 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "shortcutName": "ShopFlow",
+      "installerIcon": "frontend/public/imo_kome_authentic_logo.ico",
+      "uninstallerIcon": "frontend/public/imo_kome_authentic_logo.ico"
     }
   },
   "dependencies": {

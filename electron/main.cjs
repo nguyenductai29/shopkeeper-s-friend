@@ -10,6 +10,9 @@ const os = require('node:os')
 const isDev = !app.isPackaged
 const WINDOW_ICON_NAME = 'imo_kome_authentic_logo.ico'
 const BACKEND_HOST = '127.0.0.1'
+const APP_DATA_DIR_NAME = 'ShopFlow'
+const LEGACY_WIN_DATA_DIR_NAME = "Shopkeeper's Friend"
+const LEGACY_UNIX_DATA_DIR_NAME = 'shopkeeper-s-friend'
 
 function loadEnv() {
   const envPath = isDev
@@ -31,9 +34,25 @@ function loadEnv() {
 function getDefaultDataDir() {
   if (process.platform === 'win32') {
     const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
-    return path.join(base, "Shopkeeper's Friend")
+    return path.join(base, APP_DATA_DIR_NAME)
   }
-  return path.join(os.homedir(), '.local', 'share', 'shopkeeper-s-friend')
+  return path.join(os.homedir(), '.local', 'share', APP_DATA_DIR_NAME)
+}
+
+function getLegacyDataDir() {
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+    return path.join(base, LEGACY_WIN_DATA_DIR_NAME)
+  }
+  return path.join(os.homedir(), '.local', 'share', LEGACY_UNIX_DATA_DIR_NAME)
+}
+
+function migrateLegacyDataDir(targetDir) {
+  const legacyDir = getLegacyDataDir()
+  if (legacyDir === targetDir || !fs.existsSync(legacyDir) || fs.existsSync(targetDir)) return
+  fs.mkdirSync(path.dirname(targetDir), { recursive: true })
+  fs.cpSync(legacyDir, targetDir, { recursive: true })
+  console.log(`[main] Migrated legacy data directory to: ${targetDir}`)
 }
 
 function getWindowIconPath() {
@@ -98,6 +117,7 @@ async function startBackend() {
   if (!process.env.ELECTRON_DATA_DIR || !process.env.ELECTRON_DATA_DIR.trim()) {
     process.env.ELECTRON_DATA_DIR = getDefaultDataDir()
   }
+  migrateLegacyDataDir(process.env.ELECTRON_DATA_DIR)
 
   const backendPort = getBackendPort()
   if (isDev && await isBackendResponding(backendPort)) {
@@ -107,7 +127,7 @@ async function startBackend() {
 
   if (!await isPortAvailable(backendPort)) {
     if (isDev) {
-      throw new Error(`Port backend ${backendPort} đang được dùng nhưng không phản hồi như Shopkeeper backend.`)
+      throw new Error(`Port backend ${backendPort} đang được dùng nhưng không phản hồi như ShopFlow backend.`)
     }
 
     const fallbackPort = await findAvailablePort(backendPort + 1)
