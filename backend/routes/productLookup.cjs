@@ -14,6 +14,8 @@ const FOUND_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PARTIAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const YAHOO_SHOPPING_API_URL = 'https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch';
 const DEFAULT_YAHOO_JP_APP_ID = 'dmVyPTIwMjUwNyZpZD1tQ3p1WlhLYW82Jmhhc2g9TldabU1tVTNNbUkyWlRaa1pUazBNQQ';
+const RAKUTEN_PRODUCT_SEARCH_API_URL = 'https://openapi.rakuten.co.jp/ichibaproduct/api/Product/Search/20250801';
+const RAKUTEN_ITEM_SEARCH_API_URL = 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401';
 
 function pickFirst(...values) {
   return values.find((value) => typeof value === 'string' && value.trim())?.trim() || null;
@@ -93,7 +95,9 @@ function cacheMaxAgeMs(row, mode) {
 }
 
 function hasLegacyCrawlSource(source) {
-  return /Amazon Japan|Rakuten|Yahoo Store|Yahoo Shopping(?! API)|Web search/i.test(String(source || ''));
+  const normalizedSource = String(source || '');
+  return /Amazon Japan|Yahoo Store|Yahoo Shopping(?! API)|Web search/i.test(normalizedSource)
+    || (/\bRakuten\b/i.test(normalizedSource) && !/Rakuten (Product|Item) API/i.test(normalizedSource));
 }
 
 function cachedLookup(code, mode) {
@@ -355,7 +359,7 @@ function isLikelyImageUrl(value) {
   }
 
   const fingerprint = `${parsed.hostname}${parsed.pathname}${parsed.search}`.toLowerCase();
-  if (parsed.hostname === 'r.r10s.jp') return false;
+  if (parsed.hostname === 'r.r10s.jp' && !/^\/g\/gran_img\//i.test(parsed.pathname)) return false;
   if (
     /(^|\.)media-amazon\.com$/i.test(parsed.hostname)
     || /(^|\.)ssl-images-amazon\.com$/i.test(parsed.hostname)
@@ -650,6 +654,192 @@ async function fetchYahooShopping(params) {
   return data;
 }
 
+function getRakutenCredentials() {
+  const applicationId = process.env.RAKUTEN_APPLICATION_ID || process.env.RAKUTEN_APP_ID;
+  const accessKey = process.env.RAKUTEN_ACCESS_KEY;
+  const affiliateId = process.env.RAKUTEN_AFFILIATE_ID;
+  if (!applicationId || !accessKey) return null;
+  return { applicationId, accessKey, affiliateId };
+}
+
+function rakutenItems(data) {
+  const items = Array.isArray(data?.items)
+    ? data.items
+    : (Array.isArray(data?.Products) ? data.Products : []);
+  return items
+    .map((item) => item?.item || item)
+    .filter(Boolean);
+}
+
+function rakutenImageValue(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  return value.imageUrl || value.url || value.mediumImageUrl || value.smallImageUrl || null;
+}
+
+function rakutenImageValues(...values) {
+  return values.flatMap((value) => {
+    if (Array.isArray(value)) return value.map(rakutenImageValue);
+    return [rakutenImageValue(value)];
+  });
+}
+
+async function fetchRakutenJson(baseUrl, params, accessKey) {
+  return fetchJson(`${baseUrl}?${params.toString()}`, { accessKey });
+}
+
+function normalizeRakutenProductSearch(data, code) {
+  const items = rakutenItems(data);
+  if (!items.length) return null;
+
+  const variants = barcodeVariants(code);
+  const matchedItems = items.filter((item) => {
+    const productCode = String(item?.productCode || '').trim();
+    return !productCode || variants.includes(productCode);
+  });
+  const usableItems = matchedItems.length ? matchedItems : items;
+  const results = usableItems
+    .map((item) => {
+      const name = pickFirst(
+        item?.productName,
+        [item?.brandName, item?.productName].filter(Boolean).join(' '),
+        item?.productCaption,
+      );
+      const imageUrls = uniqueStrings(rakutenImageValues(
+        item?.mediumImageUrl,
+        item?.smallImageUrl,
+      ).filter(isLikelyImageUrl));
+      if (!name && !imageUrls.length) return null;
+      return {
+        found: true,
+        source: 'Rakuten Product API',
+        name,
+        original_name: name,
+        image_url: imageUrls[0] || null,
+        image_urls: imageUrls,
+      };
+    })
+    .filter(Boolean);
+
+  if (!results.length) return null;
+  const imageUrls = uniqueStrings(results.flatMap((result) => result.image_urls || []));
+  const primary = results.find((result) => result.name && result.image_urls?.length)
+    || results.find((result) => result.name)
+    || results[0];
+
+  return {
+    found: true,
+    source: 'Rakuten Product API',
+    name: primary.name || null,
+    original_name: primary.original_name || primary.name || null,
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
+  };
+}
+
+function normalizeRakutenItemSearch(data) {
+  const items = rakutenItems(data);
+  if (!items.length) return null;
+
+  const results = items
+    .map((item) => {
+      const name = pickFirst(
+        item?.itemName,
+        [item?.catchcopy, item?.itemName].filter(Boolean).join(' '),
+        item?.itemCaption,
+        item?.shopName,
+      );
+      const imageUrls = uniqueStrings(rakutenImageValues(
+        item?.mediumImageUrls,
+        item?.smallImageUrls,
+      ).filter(isLikelyImageUrl));
+      if (!name && !imageUrls.length) return null;
+      return {
+        found: true,
+        source: 'Rakuten Item API',
+        name,
+        original_name: name,
+        image_url: imageUrls[0] || null,
+        image_urls: imageUrls,
+      };
+    })
+    .filter(Boolean);
+
+  if (!results.length) return null;
+  const imageUrls = uniqueStrings(results.flatMap((result) => result.image_urls || []));
+  const primary = results.find((result) => result.name && result.image_urls?.length)
+    || results.find((result) => result.name)
+    || results[0];
+
+  return {
+    found: true,
+    source: 'Rakuten Item API',
+    name: primary.name || null,
+    original_name: primary.original_name || primary.name || null,
+    image_url: imageUrls[0] || null,
+    image_urls: imageUrls,
+  };
+}
+
+async function lookupRakutenProduct(code) {
+  const credentials = getRakutenCredentials();
+  if (!credentials) return null;
+
+  const params = new URLSearchParams({
+    applicationId: credentials.applicationId,
+    affiliateId: credentials.affiliateId || '',
+    format: 'json',
+    formatVersion: '2',
+    productCode: code,
+    hits: '5',
+    elements: [
+      'productCode',
+      'productName',
+      'brandName',
+      'productCaption',
+      'smallImageUrl',
+      'mediumImageUrl',
+    ].join(','),
+  });
+  if (!credentials.affiliateId) params.delete('affiliateId');
+
+  return normalizeRakutenProductSearch(
+    await fetchRakutenJson(RAKUTEN_PRODUCT_SEARCH_API_URL, params, credentials.accessKey),
+    code,
+  );
+}
+
+async function lookupRakutenItem(code) {
+  const credentials = getRakutenCredentials();
+  if (!credentials) return null;
+
+  const params = new URLSearchParams({
+    applicationId: credentials.applicationId,
+    affiliateId: credentials.affiliateId || '',
+    format: 'json',
+    formatVersion: '2',
+    keyword: code,
+    hits: '5',
+    imageFlag: '1',
+    availability: '0',
+    elements: [
+      'itemName',
+      'catchcopy',
+      'itemCaption',
+      'smallImageUrls',
+      'mediumImageUrls',
+      'imageFlag',
+      'itemCode',
+      'shopName',
+    ].join(','),
+  });
+  if (!credentials.affiliateId) params.delete('affiliateId');
+
+  return normalizeRakutenItemSearch(
+    await fetchRakutenJson(RAKUTEN_ITEM_SEARCH_API_URL, params, credentials.accessKey),
+  );
+}
+
 function cleanProductName(value) {
   return String(value || '')
     .replace(/\s*[|-]\s*(公式通販|DAISO.*|ダイソーネットストア.*|Daiso.*)$/i, '')
@@ -828,6 +1018,10 @@ async function lookupOnline(code, mode) {
   const stages = [
     [
       () => lookupYahooShopping(code),
+      () => lookupRakutenProduct(code),
+    ],
+    [
+      () => lookupRakutenItem(code),
       () => lookupOpenFacts('https://world.openfoodfacts.org', code, 'Open Food Facts'),
       () => lookupOpenFacts('https://world.openproductsfacts.org', code, 'Open Products Facts'),
       () => lookupOpenFacts('https://world.openbeautyfacts.org', code, 'Open Beauty Facts'),
