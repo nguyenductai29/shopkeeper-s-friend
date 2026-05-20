@@ -7,11 +7,12 @@ export type {
   Order,
   OrderItem,
   InvoiceTemplate,
+  PaymentQr,
   AppSettings,
   EntityId,
 } from './localStore';
 
-import type { Product, Purchase, Order, OrderItem, InvoiceTemplate, AppSettings, EntityId } from './localStore';
+import type { Product, Purchase, Order, OrderItem, InvoiceTemplate, PaymentQr, AppSettings, EntityId } from './localStore';
 
 const BASE = '/api';
 export const SETTINGS_UPDATED_EVENT = 'shopflow:settings-updated';
@@ -232,6 +233,22 @@ export const invoiceTemplatesStore = {
   },
   async setDefault(id: EntityId): Promise<void> {
     await apiFetch(`/invoice-templates/${id}/default`, { method: 'PATCH', ...json({}) });
+  },
+};
+
+// ===== Payment QR templates =====
+export const paymentQrsStore = {
+  async list(): Promise<PaymentQr[]> {
+    return apiFetch<PaymentQr[]>('/payment-qrs');
+  },
+  async create(input: Omit<PaymentQr, 'id' | 'created_at' | 'updated_at'>): Promise<PaymentQr> {
+    return apiFetch<PaymentQr>('/payment-qrs', { method: 'POST', ...json(input) });
+  },
+  async update(id: EntityId, patch: Partial<PaymentQr>): Promise<PaymentQr> {
+    return apiFetch<PaymentQr>(`/payment-qrs/${id}`, { method: 'PUT', ...json(patch) });
+  },
+  async remove(id: EntityId): Promise<void> {
+    await apiFetch(`/payment-qrs/${id}`, { method: 'DELETE' });
   },
 };
 

@@ -59,6 +59,8 @@ const DEFAULT_SETTINGS = {
   updated_at: new Date().toISOString(),
 };
 
+const DEFAULT_VIETQR_TEMPLATE = 'compact2';
+
 const DEFAULT_YAHOO_JP_APP_ID = 'dmVyPTIwMjUwNyZpZD1tQ3p1WlhLYW82Jmhhc2g9TldabU1tVTNNbUkyWlRaa1pUazBNQQ';
 
 function boolRow(row) {
@@ -223,6 +225,24 @@ function ensureDiscordSettingsColumns() {
   `);
 }
 
+function ensurePaymentQrSchema() {
+  run(`
+    CREATE TABLE IF NOT EXISTS payment_qrs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      bank_bin TEXT NOT NULL,
+      account_no TEXT NOT NULL,
+      account_name TEXT,
+      template TEXT NOT NULL DEFAULT '${DEFAULT_VIETQR_TEMPLATE}',
+      add_info TEXT,
+      fixed_amount REAL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  ensureColumn('invoice_templates', 'payment_qr_id', 'INTEGER');
+}
+
 function mappedNullableId(map, value) {
   if (value === null || value === undefined || value === '') return null;
   return map.get(String(value)) ?? null;
@@ -338,6 +358,7 @@ function migrateAutoIncrementIds() {
         shop_phone TEXT,
         header_note TEXT,
         footer_note TEXT,
+        payment_qr_id INTEGER,
         is_default INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
       )
@@ -429,7 +450,7 @@ function migrateAutoIncrementIds() {
         'invoice_templates',
         preserveInvoiceTemplateIds,
         template.id,
-        ['name', 'shop_name', 'shop_address', 'shop_phone', 'header_note', 'footer_note', 'is_default', 'created_at'],
+        ['name', 'shop_name', 'shop_address', 'shop_phone', 'header_note', 'footer_note', 'payment_qr_id', 'is_default', 'created_at'],
         [
           template.name,
           template.shop_name ?? null,
@@ -437,6 +458,7 @@ function migrateAutoIncrementIds() {
           template.shop_phone ?? null,
           template.header_note ?? null,
           template.footer_note ?? null,
+          template.payment_qr_id ?? null,
           template.is_default ? 1 : 0,
           template.created_at || now(),
         ],
@@ -626,6 +648,7 @@ async function init() {
       shop_phone TEXT,
       header_note TEXT,
       footer_note TEXT,
+      payment_qr_id INTEGER,
       is_default INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     )
@@ -687,6 +710,7 @@ async function init() {
   migrateSettingsAutoIncrementId();
   ensureColumn('settings', 'jpy_to_vnd_rate', 'REAL NOT NULL DEFAULT 170');
   ensureDiscordSettingsColumns();
+  ensurePaymentQrSchema();
   seedDefaultApiKeys();
 
   const existing = queryGet(`SELECT id FROM settings ORDER BY id LIMIT 1`);
@@ -701,5 +725,6 @@ async function init() {
 
 module.exports = {
   getDb, DEFAULT_SETTINGS, now, init, DATA_DIR,
+  DEFAULT_VIETQR_TEMPLATE,
   boolRow, boolRows, saveDb, queryAll, queryGet, run, lastInsertId,
 };

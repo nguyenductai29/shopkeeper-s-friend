@@ -60,8 +60,22 @@ export type InvoiceTemplate = {
   shop_phone: string | null;
   header_note: string | null;
   footer_note: string | null;
+  payment_qr_id: EntityId | null;
   is_default: boolean;
   created_at: string;
+};
+
+export type PaymentQr = {
+  id: EntityId;
+  name: string;
+  bank_bin: string;
+  account_no: string;
+  account_name: string | null;
+  template: string;
+  add_info: string | null;
+  fixed_amount: number | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AppSettings = {
@@ -87,6 +101,7 @@ const KEYS = {
   orders: "ls_orders",
   order_items: "ls_order_items",
   invoice_templates: "ls_invoice_templates",
+  payment_qrs: "ls_payment_qrs",
   app_settings: "ls_app_settings",
 } as const;
 
@@ -181,12 +196,14 @@ function migrateLegacyLocalStorageIds() {
   const orders = read<any>(KEYS.orders);
   const orderItems = read<any>(KEYS.order_items);
   const invoiceTemplates = read<any>(KEYS.invoice_templates);
+  const paymentQrs = read<any>(KEYS.payment_qrs);
 
   const migratedProducts = migrateRows(products, KEYS.products);
   const migratedOrders = migrateRows(orders, KEYS.orders);
   const migratedPurchases = migrateRows(purchases, KEYS.purchases);
   const migratedOrderItems = migrateRows(orderItems, KEYS.order_items);
   const migratedInvoiceTemplates = migrateRows(invoiceTemplates, KEYS.invoice_templates);
+  const migratedPaymentQrs = migrateRows(paymentQrs, KEYS.payment_qrs);
 
   write(
     KEYS.products,
@@ -217,7 +234,15 @@ function migrateLegacyLocalStorageIds() {
   );
   write(
     KEYS.invoice_templates,
-    migratedInvoiceTemplates.rows.map((row) => ({ ...row, id: Number(row.id) })),
+    migratedInvoiceTemplates.rows.map((row) => ({
+      ...row,
+      id: Number(row.id),
+      payment_qr_id: mapOptionalId(migratedPaymentQrs.map, row.payment_qr_id),
+    })),
+  );
+  write(
+    KEYS.payment_qrs,
+    migratedPaymentQrs.rows.map((row) => ({ ...row, id: Number(row.id) })),
   );
 
   localStorage.setItem(MIGRATION_KEY, "done");
@@ -379,6 +404,7 @@ export const invoiceTemplatesStore = {
       shop_phone: t.shop_phone ?? null,
       header_note: t.header_note ?? null,
       footer_note: t.footer_note ?? null,
+      payment_qr_id: t.payment_qr_id ?? null,
       is_default: !!t.is_default,
       created_at: now(),
     };
@@ -401,6 +427,43 @@ export const invoiceTemplatesStore = {
     const list = read<InvoiceTemplate>(KEYS.invoice_templates);
     list.forEach((t) => (t.is_default = t.id === id));
     write(KEYS.invoice_templates, list);
+  },
+};
+
+// ===== Payment QR templates =====
+export const paymentQrsStore = {
+  list(): PaymentQr[] {
+    return read<PaymentQr>(KEYS.payment_qrs).sort((a, b) =>
+      b.updated_at.localeCompare(a.updated_at),
+    );
+  },
+  create(input: Omit<PaymentQr, "id" | "created_at" | "updated_at">): PaymentQr {
+    const list = read<PaymentQr>(KEYS.payment_qrs);
+    const timestamp = now();
+    const created: PaymentQr = {
+      ...input,
+      id: nextId(KEYS.payment_qrs),
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    list.push(created);
+    write(KEYS.payment_qrs, list);
+    return created;
+  },
+  update(id: EntityId, patch: Partial<PaymentQr>) {
+    const list = read<PaymentQr>(KEYS.payment_qrs);
+    const item = list.find((x) => x.id === id);
+    if (item) {
+      Object.assign(item, patch, { updated_at: now() });
+      write(KEYS.payment_qrs, list);
+    }
+  },
+  remove(id: EntityId) {
+    write(KEYS.payment_qrs, read<PaymentQr>(KEYS.payment_qrs).filter((x) => x.id !== id));
+    const templates = read<InvoiceTemplate>(KEYS.invoice_templates).map((template) => (
+      template.payment_qr_id === id ? { ...template, payment_qr_id: null } : template
+    ));
+    write(KEYS.invoice_templates, templates);
   },
 };
 

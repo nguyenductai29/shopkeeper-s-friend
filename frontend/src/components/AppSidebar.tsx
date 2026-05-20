@@ -4,6 +4,7 @@ import {
   ShoppingCart,
   PackagePlus,
   FileText,
+  QrCode,
   ReceiptText,
   Users,
   Settings,
@@ -35,6 +36,7 @@ const adminItems = [
   { title: "Quản lý bán hàng", url: "/sales", icon: ReceiptText },
   { title: "Nhập hàng", url: "/import", icon: PackagePlus },
   { title: "Mẫu hoá đơn", url: "/invoice-templates", icon: FileText },
+  { title: "VietQR", url: "/payment-qrs", icon: QrCode },
   { title: "Công nợ", url: "/debts", icon: Users },
   { title: "Cài đặt", url: "/settings", icon: Settings },
 ];

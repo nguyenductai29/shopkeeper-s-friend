@@ -36,11 +36,14 @@ import {
   invoiceTemplatesStore,
   orderItemsStore,
   ordersStore,
+  paymentQrsStore,
   type EntityId,
   type InvoiceTemplate,
   type Order,
   type OrderItem,
+  type PaymentQr,
 } from "@/lib/fileStore";
+import { buildVietQrImageUrl, formatVietQrAddInfo, invoiceQrAmount } from "@/lib/vietqr";
 
 type SortKey = "id" | "created_at" | "customer_name" | "total" | "cost_total" | "profit" | "paid";
 type SortDirection = "asc" | "desc";
@@ -64,6 +67,7 @@ function Inner() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [items, setItems] = useState<Record<string, OrderItem[]>>({});
   const [templates, setTemplates] = useState<InvoiceTemplate[]>([]);
+  const [paymentQrs, setPaymentQrs] = useState<PaymentQr[]>([]);
   const [selectedId, setSelectedId] = useState<EntityId | null>(null);
   const [invoiceOrderId, setInvoiceOrderId] = useState<EntityId | null>(null);
   const [search, setSearch] = useState("");
@@ -77,12 +81,14 @@ function Inner() {
   const loadOrders = async (showLoading = false) => {
     if (showLoading) setRefreshing(true);
     try {
-      const [list, templateList] = await Promise.all([
+      const [list, templateList, qrList] = await Promise.all([
         ordersStore.list(),
         invoiceTemplatesStore.list(),
+        paymentQrsStore.list(),
       ]);
       setOrders(list);
       setTemplates(templateList);
+      setPaymentQrs(qrList);
       setItems({});
       setSelectedId((current) => (list.some((order) => order.id === current) ? current : list[0]?.id ?? null));
     } finally {
@@ -97,6 +103,9 @@ function Inner() {
   const invoiceOrder = orders.find((order) => order.id === invoiceOrderId) ?? null;
   const invoiceItems = invoiceOrderId ? items[String(invoiceOrderId)] || [] : [];
   const invoiceTemplate = templates.find((template) => template.is_default) || templates[0] || null;
+  const invoicePaymentQr = invoiceTemplate?.payment_qr_id
+    ? paymentQrs.find((qr) => qr.id === invoiceTemplate.payment_qr_id) || null
+    : null;
 
   const filteredOrders = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -483,6 +492,29 @@ function Inner() {
               <div className="text-center text-xs italic">
                 {invoiceTemplate?.footer_note || "Cảm ơn quý khách!"}
               </div>
+              {invoicePaymentQr && (
+                <div className="mt-3 text-center">
+                  {(() => {
+                    const amount = invoiceQrAmount(invoicePaymentQr, invoiceOrder.total);
+                    const addInfo = formatVietQrAddInfo(invoicePaymentQr.add_info, {
+                      orderId: invoiceOrder.id,
+                      amount,
+                    });
+                    return (
+                      <>
+                        <img
+                          src={buildVietQrImageUrl(invoicePaymentQr, { amount, addInfo })}
+                          alt={invoicePaymentQr.name}
+                          className="mx-auto h-40 w-40 object-contain"
+                        />
+                        <div className="mt-1 text-xs font-bold">{formatVND(amount)}</div>
+                        <div className="text-[11px]">{invoicePaymentQr.account_name || invoicePaymentQr.name}</div>
+                        <div className="text-[11px]">{invoicePaymentQr.bank_bin} / {invoicePaymentQr.account_no}</div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

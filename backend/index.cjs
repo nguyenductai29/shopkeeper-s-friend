@@ -21,6 +21,7 @@ app.use('/api/purchases', require('./routes/purchases.cjs'));
 app.use('/api/orders', require('./routes/orders.cjs'));
 app.use('/api/order-items', require('./routes/orderItems.cjs'));
 app.use('/api/invoice-templates', require('./routes/invoiceTemplates.cjs'));
+app.use('/api/payment-qrs', require('./routes/paymentQrs.cjs'));
 app.use('/api/settings', require('./routes/settings.cjs'));
 app.use('/api/notifications', require('./routes/notifications.cjs'));
 

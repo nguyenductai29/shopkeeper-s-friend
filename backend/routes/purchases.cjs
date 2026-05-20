@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { now, saveDb, queryAll, queryGet, run, lastInsertId } = require('../db.cjs');
-const { notifyNewPurchase } = require('../notifications.cjs');
+const { notifyLowStock, notifyNewPurchase, shouldNotifyLowStock } = require('../notifications.cjs');
 
 const router = express.Router();
 
@@ -48,7 +48,9 @@ router.put('/:id', (req, res) => {
   );
 
   const stockDelta = nextQuantity - Number(existing.quantity || 0);
+  let previousProduct = null;
   if (existing.product_id !== null && existing.product_id !== undefined) {
+    previousProduct = queryGet(`SELECT * FROM products WHERE id=?`, [existing.product_id]);
     run(
       `UPDATE products SET cost_price=?, sale_price=?, stock=MAX(0, stock + ?), updated_at=? WHERE id=?`,
       [nextCostPrice, nextSalePrice, stockDelta, now(), existing.product_id],
@@ -56,6 +58,12 @@ router.put('/:id', (req, res) => {
   }
 
   saveDb();
+  if (previousProduct) {
+    const product = queryGet(`SELECT * FROM products WHERE id=?`, [existing.product_id]);
+    if (product && shouldNotifyLowStock(previousProduct.stock, product.stock)) {
+      notifyLowStock({ ...product, previous_stock: previousProduct.stock }).catch((err) => console.error('[notify] Lỗi gửi thông báo tồn kho:', err));
+    }
+  }
   res.json(queryGet(`SELECT * FROM purchases WHERE id=?`, [req.params.id]));
 });
 

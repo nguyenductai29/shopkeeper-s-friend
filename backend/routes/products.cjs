@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { now, saveDb, queryAll, queryGet, run, lastInsertId } = require('../db.cjs');
-const { LOW_STOCK_THRESHOLD, notifyLowStock } = require('../notifications.cjs');
+const { notifyLowStock, shouldNotifyLowStock } = require('../notifications.cjs');
 
 const router = express.Router();
 
@@ -70,10 +70,9 @@ router.patch('/:id/stock', (req, res) => {
   if (
     previous
     && product
-    && Number(previous.stock) > LOW_STOCK_THRESHOLD
-    && Number(product.stock) <= LOW_STOCK_THRESHOLD
+    && shouldNotifyLowStock(previous.stock, product.stock)
   ) {
-    notifyLowStock(product).catch((err) => console.error('[notify] Lỗi gửi thông báo tồn kho:', err));
+    notifyLowStock({ ...product, previous_stock: previous.stock }).catch((err) => console.error('[notify] Lỗi gửi thông báo tồn kho:', err));
   }
   res.json({ ok: true });
 });
