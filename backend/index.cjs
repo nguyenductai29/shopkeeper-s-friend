@@ -10,7 +10,8 @@ loadEnv();
 const { init, DATA_DIR } = require('./db.cjs');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const HOST = process.env.SHOPFLOW_BACKEND_HOST || process.env.HOST || '127.0.0.1';
+const PORT = Number(process.env.PORT || 3001);
 
 app.use(cors());
 app.use(express.json());
@@ -32,9 +33,13 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 init().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Server chạy tại http://localhost:${PORT}`);
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`Server chạy tại http://${HOST}:${PORT}`);
     console.log(`Thư mục data: ${DATA_DIR}`);
+  });
+  server.on('error', (err) => {
+    console.error(`[server] Không thể listen ${HOST}:${PORT}:`, err);
+    process.exit(1);
   });
 }).catch(err => {
   console.error('[init] Lỗi khởi tạo database:', err);

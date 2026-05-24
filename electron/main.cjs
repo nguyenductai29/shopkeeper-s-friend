@@ -69,7 +69,7 @@ function getBackendPort() {
 }
 
 function getBackendUrl() {
-  return `http://localhost:${getBackendPort()}`
+  return `http://${BACKEND_HOST}:${getBackendPort()}`
 }
 
 function isBackendResponding(port) {
@@ -137,6 +137,7 @@ async function startBackend() {
     process.env.PORT = String(fallbackPort)
     console.log(`[main] Backend port ${backendPort} is busy, using ${fallbackPort}`)
   }
+  process.env.SHOPFLOW_BACKEND_HOST = BACKEND_HOST
 
   // backend/ is bundled into the asar in both dev and prod
   const backendPath = path.join(__dirname, '..', 'backend', 'index.cjs')
