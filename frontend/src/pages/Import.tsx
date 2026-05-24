@@ -17,6 +17,7 @@ import {
   Loader2,
   Package,
   Pencil,
+  Plus,
   RefreshCw,
   Save,
   ScanLine,
@@ -59,6 +60,20 @@ type SortKey = "id" | "created_at" | "product_code" | "product_name" | "cost_pri
 type SortDirection = "asc" | "desc";
 
 const PAGE_SIZE = 10;
+
+function formatPriceInput(value: number) {
+  const normalizedValue = Math.max(0, Number(value) || 0);
+  return normalizedValue.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function parsePriceInput(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits ? Number(digits) : 0;
+}
+
+function makeManualProductCode(sequence: number) {
+  return `SP-${format(new Date(), "yyyyMMddHHmmss")}-${String(sequence).padStart(3, "0")}`;
+}
 
 function formatDateTime(value: string) {
   return format(new Date(value), "dd/MM/yyyy HH:mm");
@@ -119,6 +134,8 @@ function ImportPageInner() {
   const [page, setPage] = useState(1);
   const scanRef = useRef<HTMLInputElement>(null);
   const draftKeyRef = useRef(0);
+  const pendingNameFocusKeyRef = useRef<string | null>(null);
+  const nameInputRefs = useRef(new Map<string, HTMLInputElement>());
 
   const nextDraftKey = () => {
     draftKeyRef.current += 1;
@@ -135,6 +152,13 @@ function ImportPageInner() {
   };
 
   useEffect(() => { loadPurchases(); }, []);
+
+  useEffect(() => {
+    const key = pendingNameFocusKeyRef.current;
+    if (!key) return;
+    nameInputRefs.current.get(key)?.focus();
+    pendingNameFocusKeyRef.current = null;
+  }, [rows]);
 
   const sortedPurchases = useMemo(() => {
     return [...purchases].sort((a, b) => {
@@ -244,6 +268,26 @@ function ImportPageInner() {
       name: existingProduct?.name || "",
       image_url: existingProduct?.image_url || "",
     }, existingProduct);
+  };
+
+  const handleManualAdd = () => {
+    const key = nextDraftKey();
+    pendingNameFocusKeyRef.current = key;
+    setRows((currentRows) => [
+      ...currentRows,
+      {
+        key,
+        product_id: null,
+        code: makeManualProductCode(draftKeyRef.current),
+        name: "",
+        image_url: "",
+        cost_price: 0,
+        sale_price: 0,
+        quantity: 1,
+        lookup_status: "idle",
+        lookup_message: "Mã tự tạo, nhập tay thông tin SP",
+      },
+    ]);
   };
 
   const update = (key: string, field: keyof Row, value: any) =>
@@ -466,6 +510,9 @@ function ImportPageInner() {
             />
           </div>
           <Button type="submit" size="lg">Tìm & thêm</Button>
+          <Button type="button" size="lg" variant="outline" onClick={handleManualAdd}>
+            <Plus className="mr-2 h-4 w-4" /> Thêm tay
+          </Button>
         </form>
       </Card>
 
@@ -475,11 +522,11 @@ function ImportPageInner() {
             <div className="font-semibold">Phiếu nhập đang soạn</div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="min-w-[900px]">
+            <Table className="min-w-[980px]">
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <TableHead className="w-16">Ảnh</TableHead>
-                  <TableHead className="w-24">Mã</TableHead>
+                  <TableHead className="w-44">Mã</TableHead>
                   <TableHead className="min-w-[220px]">Tên SP</TableHead>
                   <TableHead className="w-32">Giá nhập</TableHead>
                   <TableHead className="w-32">Giá bán</TableHead>
@@ -494,7 +541,7 @@ function ImportPageInner() {
                   <TableRow>
                     <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
                       <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                      Chưa có hàng nhập. Nhập mã vạch ở phía trên.
+                      Chưa có hàng nhập. Nhập mã vạch hoặc bấm Thêm tay ở phía trên.
                     </TableCell>
                   </TableRow>
                 )}
@@ -512,9 +559,36 @@ function ImportPageInner() {
                       </div>
                     </TableCell>
                     <TableCell className="p-2"><Input value={row.code} onChange={(e) => update(row.key, "code", e.target.value)} className="h-9" /></TableCell>
-                    <TableCell className="p-2"><Input value={row.name} onChange={(e) => update(row.key, "name", e.target.value)} className="h-9" placeholder="Tên sản phẩm" /></TableCell>
-                    <TableCell className="p-2"><Input type="number" value={row.cost_price} onChange={(e) => update(row.key, "cost_price", Number(e.target.value))} className="h-9" /></TableCell>
-                    <TableCell className="p-2"><Input type="number" value={row.sale_price} onChange={(e) => update(row.key, "sale_price", Number(e.target.value))} className="h-9" /></TableCell>
+                    <TableCell className="p-2">
+                      <Input
+                        ref={(element) => {
+                          if (element) nameInputRefs.current.set(row.key, element);
+                          else nameInputRefs.current.delete(row.key);
+                        }}
+                        value={row.name}
+                        onChange={(e) => update(row.key, "name", e.target.value)}
+                        className="h-9"
+                        placeholder="Tên sản phẩm"
+                      />
+                    </TableCell>
+                    <TableCell className="p-2">
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={formatPriceInput(row.cost_price)}
+                        onChange={(e) => update(row.key, "cost_price", parsePriceInput(e.target.value))}
+                        className="h-9"
+                      />
+                    </TableCell>
+                    <TableCell className="p-2">
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={formatPriceInput(row.sale_price)}
+                        onChange={(e) => update(row.key, "sale_price", parsePriceInput(e.target.value))}
+                        className="h-9"
+                      />
+                    </TableCell>
                     <TableCell className="p-2"><Input type="number" value={row.quantity} onChange={(e) => update(row.key, "quantity", Number(e.target.value))} className="h-9" /></TableCell>
                     <TableCell className="p-2 text-right font-medium">{formatVND(row.cost_price * row.quantity)}</TableCell>
                     <TableCell className="p-2">
@@ -525,7 +599,7 @@ function ImportPageInner() {
                             {row.lookup_message}
                           </span>
                         </div>
-                        {row.lookup_status !== "loading" && (
+                        {row.lookup_status !== "loading" && row.lookup_status !== "idle" && (
                           <Button
                             type="button"
                             size="sm"
@@ -567,12 +641,12 @@ function ImportPageInner() {
             <div className="text-sm text-muted-foreground">{purchases.length} dòng</div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="min-w-[1040px]">
+            <Table className="min-w-[1120px]">
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <SortableHead sortKey="id" className="w-20">ID</SortableHead>
                   <SortableHead sortKey="created_at" className="w-40">Thời gian</SortableHead>
-                  <SortableHead sortKey="product_code" className="w-32">Mã</SortableHead>
+                  <SortableHead sortKey="product_code" className="w-44">Mã</SortableHead>
                   <SortableHead sortKey="product_name">Tên sản phẩm</SortableHead>
                   <SortableHead sortKey="cost_price" className="w-32 text-right">Giá nhập</SortableHead>
                   <SortableHead sortKey="sale_price" className="w-32 text-right">Giá bán</SortableHead>
@@ -600,19 +674,19 @@ function ImportPageInner() {
                       <>
                         <TableCell className="p-2">
                           <Input
-                            type="number"
-                            min={0}
-                            value={editingPurchase.cost_price}
-                            onChange={(e) => updateEditingPurchase("cost_price", Number(e.target.value))}
+                            type="text"
+                            inputMode="numeric"
+                            value={formatPriceInput(editingPurchase.cost_price)}
+                            onChange={(e) => updateEditingPurchase("cost_price", parsePriceInput(e.target.value))}
                             className="h-9 text-right"
                           />
                         </TableCell>
                         <TableCell className="p-2">
                           <Input
-                            type="number"
-                            min={0}
-                            value={editingPurchase.sale_price}
-                            onChange={(e) => updateEditingPurchase("sale_price", Number(e.target.value))}
+                            type="text"
+                            inputMode="numeric"
+                            value={formatPriceInput(editingPurchase.sale_price)}
+                            onChange={(e) => updateEditingPurchase("sale_price", parsePriceInput(e.target.value))}
                             className="h-9 text-right"
                           />
                         </TableCell>

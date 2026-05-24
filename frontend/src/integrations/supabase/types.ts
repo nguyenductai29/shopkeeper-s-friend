@@ -147,6 +147,7 @@ export type Database = {
           customer_address: string | null
           customer_name: string | null
           customer_phone: string | null
+          discount: number
           id: string
           note: string | null
           paid: boolean
@@ -158,6 +159,7 @@ export type Database = {
           customer_address?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          discount?: number
           id?: string
           note?: string | null
           paid?: boolean
@@ -169,6 +171,7 @@ export type Database = {
           customer_address?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          discount?: number
           id?: string
           note?: string | null
           paid?: boolean

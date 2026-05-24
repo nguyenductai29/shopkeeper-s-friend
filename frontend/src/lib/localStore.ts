@@ -47,6 +47,7 @@ export type Order = {
   customer_address: string | null;
   total: number;
   cost_total: number;
+  discount: number;
   paid: boolean;
   note: string | null;
   created_at: string;
@@ -219,7 +220,7 @@ function migrateLegacyLocalStorageIds() {
   );
   write(
     KEYS.orders,
-    migratedOrders.rows.map((row) => ({ ...row, id: Number(row.id) })),
+    migratedOrders.rows.map((row) => ({ ...row, id: Number(row.id), discount: Number(row.discount || 0) })),
   );
   write(
     KEYS.order_items,
@@ -345,7 +346,9 @@ export const purchasesStore = {
 // ===== Orders + items =====
 export const ordersStore = {
   list(): Order[] {
-    return read<Order>(KEYS.orders).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return read<Order>(KEYS.orders)
+      .map((order) => ({ ...order, discount: Number(order.discount || 0) }))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
   },
   listSince(iso: string): Order[] {
     return this.list().filter((o) => o.created_at >= iso);
@@ -358,7 +361,7 @@ export const ordersStore = {
   },
   create(o: Omit<Order, "id" | "created_at">): Order {
     const list = read<Order>(KEYS.orders);
-    const created: Order = { ...o, id: nextId(KEYS.orders), created_at: now() };
+    const created: Order = { ...o, discount: Number(o.discount || 0), id: nextId(KEYS.orders), created_at: now() };
     list.push(created);
     write(KEYS.orders, list);
     return created;

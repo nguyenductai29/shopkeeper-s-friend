@@ -131,6 +131,7 @@ async function notifyNewOrder(order) {
     fields: [
       field('👤 Khách hàng', customer),
       order.customer_phone ? field('☎️ SĐT', order.customer_phone) : null,
+      Number(order.discount || 0) > 0 ? field('🏷️ Giảm giá', formatVnd(order.discount)) : null,
       field('💰 Tổng tiền', formatVnd(order.total)),
       field('💳 Thanh toán', order.paid ? 'Đã thanh toán' : 'Chưa thanh toán'),
     ],
@@ -152,6 +153,7 @@ async function notifyDebtOrder(order) {
       field('👤 Khách hàng', customer),
       order.customer_phone ? field('☎️ SĐT', order.customer_phone) : null,
       order.customer_address ? field('📍 Địa chỉ', order.customer_address, false) : null,
+      Number(order.discount || 0) > 0 ? field('🏷️ Giảm giá', formatVnd(order.discount)) : null,
       field('💰 Số tiền nợ', formatVnd(order.total)),
     ],
   });

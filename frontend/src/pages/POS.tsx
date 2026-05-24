@@ -14,10 +14,21 @@ import { productsStore, ordersStore, orderItemsStore, type EntityId, type Produc
 
 type CartItem = Product & { qty: number };
 
+function formatMoneyInput(value: number) {
+  const normalizedValue = Math.max(0, Number(value) || 0);
+  return normalizedValue.toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+
+function parseMoneyInput(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits ? Number(digits) : 0;
+}
+
 export default function POS() {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [discount, setDiscount] = useState(0);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
@@ -120,8 +131,14 @@ export default function POS() {
   };
   const removeItem = (id: EntityId) => setCart((c) => c.filter((x) => x.id !== id));
 
-  const total = cart.reduce((s, x) => s + x.sale_price * x.qty, 0);
+  const subtotal = cart.reduce((s, x) => s + x.sale_price * x.qty, 0);
+  const discountAmount = Math.min(subtotal, Math.max(0, Number(discount) || 0));
+  const total = Math.max(0, subtotal - discountAmount);
   const costTotal = cart.reduce((s, x) => s + x.cost_price * x.qty, 0);
+
+  useEffect(() => {
+    setDiscount((current) => Math.min(current, subtotal));
+  }, [subtotal]);
 
   const checkout = async () => {
     if (cart.length === 0) return toast.error("Giỏ hàng trống");
@@ -144,6 +161,7 @@ export default function POS() {
         customer_address: address || null,
         total,
         cost_total: costTotal,
+        discount: discountAmount,
         paid,
         note: null,
       });
@@ -163,7 +181,7 @@ export default function POS() {
         return productsStore.updateStock(x.id, Number(latest?.stock || 0) - x.qty);
       }));
       toast.success("Đã tạo đơn hàng");
-      setCart([]); setName(""); setPhone(""); setAddress(""); setPaid(true);
+      setCart([]); setDiscount(0); setName(""); setPhone(""); setAddress(""); setPaid(true);
       load();
     } catch {
       toast.error("Lỗi tạo đơn");
@@ -294,11 +312,27 @@ export default function POS() {
               <Label htmlFor="paid" className="text-sm cursor-pointer">Đã thanh toán</Label>
               <Switch id="paid" checked={paid} onCheckedChange={setPaid} />
             </div>
+            <div>
+              <Label className="text-xs">Giảm giá</Label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                value={formatMoneyInput(discount)}
+                onChange={(e) => setDiscount(Math.min(parseMoneyInput(e.target.value), subtotal))}
+                placeholder="0"
+              />
+            </div>
           </div>
 
           <div className="mt-3 shrink-0 space-y-1 border-t pt-3">
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>Tổng SP</span><span>{cart.reduce((s, x) => s + x.qty, 0)}</span>
+            </div>
+            <div className="flex justify-between text-sm text-muted-foreground">
+              <span>Tạm tính</span><span>{formatVND(subtotal)}</span>
+            </div>
+            <div className="flex justify-between text-sm text-muted-foreground">
+              <span>Giảm giá</span><span>-{formatVND(discountAmount)}</span>
             </div>
             <div className="flex justify-between text-lg font-semibold">
               <span>Tổng tiền</span><span className="text-primary">{formatVND(total)}</span>

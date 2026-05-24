@@ -26,15 +26,16 @@ router.post('/', (req, res) => {
     customer_name: b.customer_name ?? null,
     customer_phone: b.customer_phone ?? null,
     customer_address: b.customer_address ?? null,
-    total: b.total ?? 0,
-    cost_total: b.cost_total ?? 0,
+    total: Math.max(0, Number(b.total ?? 0) || 0),
+    cost_total: Math.max(0, Number(b.cost_total ?? 0) || 0),
+    discount: Math.max(0, Number(b.discount ?? 0) || 0),
     paid: b.paid ? 1 : 0,
     note: b.note ?? null,
     created_at: now(),
   };
   run(
-    `INSERT INTO orders (customer_name,customer_phone,customer_address,total,cost_total,paid,note,created_at) VALUES (?,?,?,?,?,?,?,?)`,
-    [created.customer_name, created.customer_phone, created.customer_address, created.total, created.cost_total, created.paid, created.note, created.created_at]
+    `INSERT INTO orders (customer_name,customer_phone,customer_address,total,cost_total,discount,paid,note,created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    [created.customer_name, created.customer_phone, created.customer_address, created.total, created.cost_total, created.discount, created.paid, created.note, created.created_at]
   );
   const id = lastInsertId();
   saveDb();

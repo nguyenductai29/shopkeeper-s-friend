@@ -45,7 +45,7 @@ import {
 } from "@/lib/fileStore";
 import { buildVietQrImageUrl, formatVietQrAddInfo, invoiceQrAmount } from "@/lib/vietqr";
 
-type SortKey = "id" | "created_at" | "customer_name" | "total" | "cost_total" | "profit" | "paid";
+type SortKey = "id" | "created_at" | "customer_name" | "total" | "cost_total" | "discount" | "profit" | "paid";
 type SortDirection = "asc" | "desc";
 
 const PAGE_SIZE = 12;
@@ -56,6 +56,15 @@ function formatDateTime(value: string) {
 
 function profit(order: Order) {
   return Number(order.total || 0) - Number(order.cost_total || 0);
+}
+
+function orderDiscount(order: Order) {
+  return Number(order.discount || 0);
+}
+
+function orderSubtotal(order: Order, items: OrderItem[]) {
+  const itemSubtotal = items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+  return itemSubtotal > 0 ? itemSubtotal : Number(order.total || 0) + orderDiscount(order);
 }
 
 function compareValues(a: unknown, b: unknown) {
@@ -219,6 +228,7 @@ function Inner() {
         { header: "Khách hàng", value: (row) => row.customer_name || "Khách lẻ" },
         { header: "SĐT", value: (row) => row.customer_phone || "" },
         { header: "Địa chỉ", value: (row) => row.customer_address || "" },
+        { header: "Giảm giá", value: (row) => orderDiscount(row) },
         { header: "Doanh thu", value: (row) => Number(row.total) },
         { header: "Giá vốn", value: (row) => Number(row.cost_total) },
         { header: "Lợi nhuận", value: (row) => profit(row) },
@@ -282,12 +292,13 @@ function Inner() {
       <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_380px]">
         <Card className="flex min-h-0 flex-col overflow-hidden shadow-elegant">
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="min-w-[920px]">
+            <Table className="min-w-[1040px]">
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <SortableHead sortKey="id" className="w-20">ID</SortableHead>
                   <SortableHead sortKey="created_at" className="w-40">Thời gian</SortableHead>
                   <SortableHead sortKey="customer_name">Khách hàng</SortableHead>
+                  <SortableHead sortKey="discount" className="w-32 text-right">Giảm giá</SortableHead>
                   <SortableHead sortKey="total" className="w-36 text-right">Doanh thu</SortableHead>
                   <SortableHead sortKey="cost_total" className="w-32 text-right">Giá vốn</SortableHead>
                   <SortableHead sortKey="profit" className="w-32 text-right">Lãi</SortableHead>
@@ -298,7 +309,7 @@ function Inner() {
               <TableBody>
                 {visibleOrders.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
                       <ReceiptText className="mx-auto mb-2 h-10 w-10 opacity-40" />
                       Chưa có đơn hàng.
                     </TableCell>
@@ -317,6 +328,7 @@ function Inner() {
                       <div className="font-medium">{order.customer_name || "Khách lẻ"}</div>
                       <div className="text-xs text-muted-foreground">{order.customer_phone || ""}</div>
                     </TableCell>
+                    <TableCell className="text-right">{formatVND(orderDiscount(order))}</TableCell>
                     <TableCell className="text-right font-semibold">{formatVND(order.total)}</TableCell>
                     <TableCell className="text-right">{formatVND(order.cost_total)}</TableCell>
                     <TableCell className="text-right">{formatVND(profit(order))}</TableCell>
@@ -426,6 +438,16 @@ function Inner() {
               </div>
 
               <div className="shrink-0 space-y-1 border-t p-3">
+                {orderDiscount(selectedOrder) > 0 && (
+                  <>
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>Tạm tính</span><span>{formatVND(orderSubtotal(selectedOrder, selectedItems))}</span>
+                    </div>
+                    <div className="flex justify-between text-sm text-muted-foreground">
+                      <span>Giảm giá</span><span>-{formatVND(orderDiscount(selectedOrder))}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between text-sm text-muted-foreground">
                   <span>Giá vốn</span><span>{formatVND(selectedOrder.cost_total)}</span>
                 </div>
@@ -481,6 +503,18 @@ function Inner() {
                 ))}
               </div>
               <div className="my-3 border-t border-dashed border-black/60" />
+              {orderDiscount(invoiceOrder) > 0 && (
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span>Tạm tính</span>
+                    <span>{formatVND(orderSubtotal(invoiceOrder, invoiceItems))}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Giảm giá</span>
+                    <span>-{formatVND(orderDiscount(invoiceOrder))}</span>
+                  </div>
+                </div>
+              )}
               <div className="flex justify-between text-base font-bold">
                 <span>Tổng</span>
                 <span>{formatVND(invoiceOrder.total)}</span>

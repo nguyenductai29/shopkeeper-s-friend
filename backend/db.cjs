@@ -40,6 +40,30 @@ function saveDb() {
   fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
 
+function envOrDefault(name, fallback) {
+  const normalized = String(process.env[name] || '').trim();
+  return normalized || fallback;
+}
+
+const DEFAULT_DISCORD_WEBHOOKS = {
+  sales: envOrDefault(
+    'SHOPFLOW_DISCORD_SALES_WEBHOOK',
+    'https://discord.com/api/webhooks/1506068398474395790/HdEylRs3vDixOCxtru6_RrseDQq-PlJq442mFxJ-MdsjTlemyYN2grDaNhyUBRZMdkwL',
+  ),
+  purchases: envOrDefault(
+    'SHOPFLOW_DISCORD_PURCHASE_WEBHOOK',
+    'https://discord.com/api/webhooks/1506068574895079445/vXZ9wJb4YaCjlx0Hcu4BdGnaTx2yLAtXXPpH65CvbwjUZPsgolYduKs3CRvqwnkUIR2D',
+  ),
+  lowStock: envOrDefault(
+    'SHOPFLOW_DISCORD_LOW_STOCK_WEBHOOK',
+    'https://discord.com/api/webhooks/1506068686354649168/6hVCMuI0AwCZYlyaFJrmzGw5q2aKpKIsnTcx_kabIa9Wi3dwKzJRM4qHrqJOwREFaUa_',
+  ),
+  debts: envOrDefault(
+    'SHOPFLOW_DISCORD_DEBT_WEBHOOK',
+    'https://discord.com/api/webhooks/1506068811235856567/CsnC1d0jVw2yTc76zdARbpqqZ8u-MzHwrAMpi5RLvcP7-M-T4oZFgSVSTAVX-T8rpFPO',
+  ),
+};
+
 const DEFAULT_SETTINGS = {
   id: 1,
   shop_name: null,
@@ -50,10 +74,10 @@ const DEFAULT_SETTINGS = {
   notify_on_purchase: false,
   notify_on_debt: false,
   notify_discord_webhook: null,
-  notify_discord_sales_webhook: null,
-  notify_discord_purchase_webhook: null,
-  notify_discord_low_stock_webhook: null,
-  notify_discord_debt_webhook: null,
+  notify_discord_sales_webhook: DEFAULT_DISCORD_WEBHOOKS.sales,
+  notify_discord_purchase_webhook: DEFAULT_DISCORD_WEBHOOKS.purchases,
+  notify_discord_low_stock_webhook: DEFAULT_DISCORD_WEBHOOKS.lowStock,
+  notify_discord_debt_webhook: DEFAULT_DISCORD_WEBHOOKS.debts,
   notify_facebook: null,
   notify_email: null,
   updated_at: new Date().toISOString(),
@@ -225,6 +249,76 @@ function ensureDiscordSettingsColumns() {
   `);
 }
 
+function insertDefaultSettingsRow() {
+  run(
+    `INSERT INTO settings
+      (currency,jpy_to_vnd_rate,notify_on_low_stock,notify_on_new_order,notify_on_purchase,notify_on_debt,notify_discord_sales_webhook,notify_discord_purchase_webhook,notify_discord_low_stock_webhook,notify_discord_debt_webhook,notify_discord_webhook,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      DEFAULT_SETTINGS.currency,
+      DEFAULT_SETTINGS.jpy_to_vnd_rate,
+      1,
+      1,
+      1,
+      1,
+      DEFAULT_DISCORD_WEBHOOKS.sales,
+      DEFAULT_DISCORD_WEBHOOKS.purchases,
+      DEFAULT_DISCORD_WEBHOOKS.lowStock,
+      DEFAULT_DISCORD_WEBHOOKS.debts,
+      DEFAULT_DISCORD_WEBHOOKS.sales,
+      now(),
+    ],
+  );
+}
+
+function seedDefaultDiscordSettings() {
+  const existing = queryGet(`SELECT * FROM settings ORDER BY id LIMIT 1`);
+  if (!existing) {
+    insertDefaultSettingsRow();
+    return;
+  }
+
+  const webhookFields = [
+    ['notify_discord_sales_webhook', DEFAULT_DISCORD_WEBHOOKS.sales],
+    ['notify_discord_purchase_webhook', DEFAULT_DISCORD_WEBHOOKS.purchases],
+    ['notify_discord_low_stock_webhook', DEFAULT_DISCORD_WEBHOOKS.lowStock],
+    ['notify_discord_debt_webhook', DEFAULT_DISCORD_WEBHOOKS.debts],
+  ];
+  const hadNoWebhooks = webhookFields.every(([field]) => !normalizeEnvValue(existing[field]))
+    && !normalizeEnvValue(existing.notify_discord_webhook);
+  const updates = [];
+  const values = [];
+
+  for (const [field, value] of webhookFields) {
+    if (!normalizeEnvValue(existing[field])) {
+      updates.push(`${field}=?`);
+      values.push(value);
+    }
+  }
+
+  if (!normalizeEnvValue(existing.notify_discord_webhook)) {
+    updates.push('notify_discord_webhook=?');
+    values.push(DEFAULT_DISCORD_WEBHOOKS.sales);
+  }
+
+  if (hadNoWebhooks) {
+    updates.push(
+      'notify_on_new_order=?',
+      'notify_on_purchase=?',
+      'notify_on_low_stock=?',
+      'notify_on_debt=?',
+    );
+    values.push(1, 1, 1, 1);
+  }
+
+  if (updates.length === 0) return;
+
+  run(
+    `UPDATE settings SET ${updates.join(', ')}, updated_at=? WHERE id=?`,
+    [...values, now(), existing.id],
+  );
+}
+
 function ensurePaymentQrSchema() {
   run(`
     CREATE TABLE IF NOT EXISTS payment_qrs (
@@ -328,6 +422,7 @@ function migrateAutoIncrementIds() {
         customer_address TEXT,
         total REAL NOT NULL DEFAULT 0,
         cost_total REAL NOT NULL DEFAULT 0,
+        discount REAL NOT NULL DEFAULT 0,
         paid INTEGER NOT NULL DEFAULT 0,
         note TEXT,
         created_at TEXT NOT NULL
@@ -408,13 +503,14 @@ function migrateAutoIncrementIds() {
         'orders',
         preserveOrderIds,
         order.id,
-        ['customer_name', 'customer_phone', 'customer_address', 'total', 'cost_total', 'paid', 'note', 'created_at'],
+        ['customer_name', 'customer_phone', 'customer_address', 'total', 'cost_total', 'discount', 'paid', 'note', 'created_at'],
         [
           order.customer_name ?? null,
           order.customer_phone ?? null,
           order.customer_address ?? null,
           order.total ?? 0,
           order.cost_total ?? 0,
+          order.discount ?? 0,
           order.paid ? 1 : 0,
           order.note ?? null,
           order.created_at || now(),
@@ -618,6 +714,7 @@ async function init() {
       customer_address TEXT,
       total REAL NOT NULL DEFAULT 0,
       cost_total REAL NOT NULL DEFAULT 0,
+      discount REAL NOT NULL DEFAULT 0,
       paid INTEGER NOT NULL DEFAULT 0,
       note TEXT,
       created_at TEXT NOT NULL
@@ -708,16 +805,12 @@ async function init() {
 
   migrateAutoIncrementIds();
   migrateSettingsAutoIncrementId();
+  ensureColumn('orders', 'discount', 'REAL NOT NULL DEFAULT 0');
   ensureColumn('settings', 'jpy_to_vnd_rate', 'REAL NOT NULL DEFAULT 170');
   ensureDiscordSettingsColumns();
   ensurePaymentQrSchema();
   seedDefaultApiKeys();
-
-  const existing = queryGet(`SELECT id FROM settings ORDER BY id LIMIT 1`);
-  if (!existing) {
-    run(`INSERT INTO settings (currency, jpy_to_vnd_rate, notify_on_low_stock, notify_on_new_order, updated_at)
-         VALUES ('VND', ?, 0, 0, ?)`, [DEFAULT_SETTINGS.jpy_to_vnd_rate, now()]);
-  }
+  seedDefaultDiscordSettings();
 
   saveDb();
   console.log(`[init] SQLite database: ${DB_PATH}`);
