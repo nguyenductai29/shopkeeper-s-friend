@@ -74,6 +74,11 @@ const TERM_REPLACEMENTS = [
   [/小林製薬/g, 'Kobayashi'],
   [/ロート製薬/g, 'Rohto'],
   [/ライオン/g, 'Lion'],
+  [/ピジョン/g, 'Pigeon'],
+  [/キュレル/g, 'Curel'],
+  [/ビオレ/g, 'Biore'],
+  [/ニベア/g, 'Nivea'],
+  [/メンソレータム/g, 'Mentholatum'],
   [/ユニ・チャーム|ユニチャーム/g, 'Unicharm'],
   [/大王製紙/g, 'Daio Paper'],
   [/サントリー/g, 'Suntory'],
@@ -93,6 +98,9 @@ const TERM_REPLACEMENTS = [
   [/無香料/g, 'không mùi'],
   [/無着色/g, 'không màu'],
   [/パラベンフリー/g, 'không paraben'],
+  [/敏感肌/g, 'da nhạy cảm'],
+  [/潤浸/g, 'dưỡng ẩm sâu'],
+  [/フェイス/g, 'da mặt'],
   [/クリーム/g, 'kem'],
   [/ジェル/g, 'gel'],
   [/ローション/g, 'lotion'],
@@ -180,7 +188,45 @@ const TERM_REPLACEMENTS = [
   [/\bmedicated\b/gi, 'dược dụng'],
   [/\btooth\s*paste\b|\btoothpaste\b/gi, 'kem đánh răng'],
   [/\bwet\s*(?:tissue|wipes)\b/gi, 'khăn giấy ướt'],
+  [/\bface\s*wash\b|\bfacial\s*wash\b|\bcleanser\b/gi, 'sữa rửa mặt'],
+  [/\bbody\s*soap\b|\bbody\s*wash\b|\bshower\s*gel\b/gi, 'sữa tắm'],
+  [/\bhand\s*soap\b|\bhand\s*wash\b/gi, 'nước rửa tay'],
+  [/\bshampoo\b/gi, 'dầu gội'],
+  [/\bconditioner\b/gi, 'dầu xả'],
+  [/\blotion\b/gi, 'lotion'],
+  [/\bserum\b/gi, 'serum'],
+  [/\bsunscreen\b|\bsun\s*screen\b|\bsunblock\b/gi, 'kem chống nắng'],
+  [/\blip\s*balm\b/gi, 'son dưỡng môi'],
+  [/\beye\s*drops?\b/gi, 'thuốc nhỏ mắt'],
+  [/\bcandy\b/gi, 'kẹo'],
+  [/\bgummy|gummies\b/gi, 'kẹo dẻo'],
+  [/\bchocolate\b/gi, 'sô cô la'],
+  [/\bcookies?\b|\bbiscuits?\b/gi, 'bánh quy'],
+  [/\brice\s*cracker\b/gi, 'bánh gạo'],
+  [/\bsnacks?\b/gi, 'snack'],
+  [/\bpowder\b/gi, 'dạng bột'],
+  [/\btablets?\b|\bcapsules?\b/gi, 'viên'],
+  [/\bsupplements?\b/gi, 'thực phẩm bổ sung'],
+  [/\bvitamins?\b/gi, 'vitamin'],
+  [/\bcalcium\b/gi, 'canxi'],
+  [/\biron\b/gi, 'sắt'],
+  [/\bprotein\b/gi, 'protein'],
+  [/\bmasks?\b/gi, 'khẩu trang'],
+  [/\bdetergent\b|\blaundry\s*soap\b/gi, 'nước giặt'],
+  [/\bfabric\s*softener\b|\bsoftener\b/gi, 'nước xả vải'],
+  [/\bdeodorant\b/gi, 'khử mùi'],
+  [/\brepellent\b|\binsect\s*repellent\b/gi, 'chống côn trùng'],
+  [/\bdisinfect(?:ant|ing)?\b|\bsanitize(?:r|d|ing)?\b/gi, 'khử khuẩn'],
+  [/\bantibacterial\b/gi, 'kháng khuẩn'],
+  [/\balcohol\b/gi, 'cồn'],
+  [/\brefill\b/gi, 'túi thay thế'],
+  [/\bbottle\b/gi, 'chai'],
 ];
+
+const VIETNAMESE_HINTS = /\b(?:kem|dầu|sữa|khăn|giấy|kẹo|bánh|gạo|nước|sốt|gia vị|dạng|bột|viên|thuốc|khẩu trang|chống|khử|khuẩn|mùi|dưỡng|ẩm|rửa|giặt|xả|em bé|da khô|không|cồn|chai|gói|tờ|cái|muối|bắp|mật ong)\b/i;
+const VIETNAMESE_DIACRITICS = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i;
+const JAPANESE_OR_CJK = /[\u3040-\u30ff\u3400-\u9fff]/;
+const ENGLISH_PRODUCT_WORDS = /\b(?:cream|moisturizing|lotion|shampoo|conditioner|soap|wash|cleanser|serum|sunscreen|sunblock|toothpaste|wipes|tissue|powder|tablet|capsule|supplement|snack|candy|chocolate|cookie|biscuit|mask|detergent|softener|deodorant|repellent|disinfectant|sanitize|antibacterial|alcohol|refill|bottle|baby|dry\s*skin|face|body|hand|lip|eye\s*drops?)\b/i;
 
 function compactParts(parts) {
   return parts
@@ -244,7 +290,7 @@ function normalizeSpec(value) {
 function applyDictionary(name) {
   let output = name;
   for (const [pattern, replacement] of TERM_REPLACEMENTS) {
-    output = output.replace(pattern, replacement);
+    output = output.replace(pattern, replacement ? ` ${replacement} ` : ' ');
   }
   return output;
 }
@@ -253,6 +299,8 @@ function removeLeftoverNoise(value) {
   return String(value || '')
     .replace(/\([^)]*(?:公式|通販|Amazon|楽天|Yahoo|ヨドバシ|ビックカメラ)[^)]*\)/gi, ' ')
     .replace(/\b(?:official|store|online|shop)\b/gi, ' ')
+    .replace(/([\u3040-\u30ff\u3400-\u9fff])([A-Za-zÀ-ỹ])/g, '$1 $2')
+    .replace(/([A-Za-zÀ-ỹ])([\u3040-\u30ff\u3400-\u9fff])/g, '$1 $2')
     .replace(/\s*[|｜/]\s*/g, ' ')
     .replace(/\s*[-_]\s*/g, ' ')
     .replace(/\s*,\s*/g, ', ')
@@ -274,6 +322,25 @@ function shortenName(value, maxLength = 72) {
   return `${cut.slice(0, lastBreak > 36 ? lastBreak : maxLength).trim()}...`;
 }
 
+function hasJapaneseOrCjk(value) {
+  return JAPANESE_OR_CJK.test(String(value || ''));
+}
+
+function hasVietnameseSignal(value) {
+  const text = String(value || '');
+  return VIETNAMESE_DIACRITICS.test(text) || VIETNAMESE_HINTS.test(text);
+}
+
+function shouldMachineTranslateProductName(originalName, localizedName) {
+  const original = String(originalName || '').trim();
+  const localized = String(localizedName || '').trim();
+  if (!original) return false;
+  if (hasJapaneseOrCjk(original)) return true;
+  if (hasJapaneseOrCjk(localized)) return true;
+  if (ENGLISH_PRODUCT_WORDS.test(original) && !hasVietnameseSignal(localized)) return true;
+  return false;
+}
+
 function localizeProductName(value) {
   const source = cleanSourceName(value);
   if (!source) return null;
@@ -292,4 +359,7 @@ function localizeProductName(value) {
 module.exports = {
   localizeProductName,
   cleanSourceName,
+  hasJapaneseOrCjk,
+  hasVietnameseSignal,
+  shouldMachineTranslateProductName,
 };

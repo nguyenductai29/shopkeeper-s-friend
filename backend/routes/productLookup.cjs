@@ -3,13 +3,15 @@
 const express = require('express');
 const cheerio = require('cheerio');
 const { now, queryGet, run, saveDb } = require('../db.cjs');
-const { localizeProductName } = require('../productNameVi.cjs');
+const { localizeProductName, shouldMachineTranslateProductName } = require('../productNameVi.cjs');
 
 const router = express.Router();
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const LOOKUP_TIMEOUT_MS = 4500;
 const IMAGE_TIMEOUT_MS = 12000;
+const TRANSLATE_TIMEOUT_MS = Number(process.env.PRODUCT_TRANSLATE_TIMEOUT_MS || 3000);
+const MACHINE_TRANSLATION_ENABLED = String(process.env.PRODUCT_TRANSLATE_ENABLED || '1') !== '0';
 const FOUND_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PARTIAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const YAHOO_SHOPPING_API_URL = 'https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch';
@@ -39,13 +41,84 @@ function normalizeLookupResult(result) {
     result.image_url,
   ].filter(isLikelyImageUrl));
   const originalName = result.original_name || result.name || null;
-  const localizedName = localizeProductName(originalName) || originalName;
+  const dictionaryName = localizeProductName(originalName) || originalName;
+  const name = result.original_name && result.name && result.name !== result.original_name
+    ? result.name
+    : dictionaryName;
   return {
     ...result,
     original_name: originalName,
-    name: localizedName,
+    name,
     image_url: imageUrls[0] || null,
     image_urls: imageUrls,
+  };
+}
+
+function cleanMachineTranslatedName(value) {
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([([{])\s+/g, '$1')
+    .replace(/\s+([)\]}])/g, '$1')
+    .trim();
+  if (!text || text.length < 2 || text.length > 180) return null;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function parseGoogleTranslateResponse(data) {
+  if (!Array.isArray(data?.[0])) return null;
+  return cleanMachineTranslatedName(
+    data[0]
+      .map((part) => Array.isArray(part) ? part[0] : '')
+      .join(''),
+  );
+}
+
+async function translateTextToVietnamese(text) {
+  if (!MACHINE_TRANSLATION_ENABLED) return null;
+  const source = String(text || '').trim();
+  if (!source) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
+  try {
+    const url = new URL('https://translate.googleapis.com/translate_a/single');
+    url.searchParams.set('client', 'gtx');
+    url.searchParams.set('sl', 'auto');
+    url.searchParams.set('tl', 'vi');
+    url.searchParams.set('dt', 't');
+    url.searchParams.set('q', source);
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        Accept: 'application/json,text/plain,*/*',
+        'User-Agent': USER_AGENT,
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    return parseGoogleTranslateResponse(await res.json());
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function maybeTranslateLookupResult(result) {
+  const normalized = normalizeLookupResult(result);
+  if (!normalized?.found) return result;
+
+  const originalName = normalized.original_name || normalized.name;
+  if (!shouldMachineTranslateProductName(originalName, normalized.name)) return normalized;
+
+  const translatedName = await translateTextToVietnamese(originalName);
+  if (!translatedName) return normalized;
+  if (translatedName.toLowerCase() === String(normalized.name || '').toLowerCase()) return normalized;
+
+  return {
+    ...normalized,
+    name: translatedName,
   };
 }
 
@@ -1069,10 +1142,16 @@ router.get('/:code', async (req, res) => {
 
   if (!refresh) {
     const cached = cachedLookup(code, mode);
-    if (cached) return res.json(cached);
+    if (cached) {
+      const translatedCached = await maybeTranslateLookupResult(cached);
+      if (translatedCached?.name && translatedCached.name !== cached.name) {
+        saveLookupCache(code, translatedCached, mode);
+      }
+      return res.json(translatedCached);
+    }
   }
 
-  const result = await lookupOnline(code, mode);
+  const result = await maybeTranslateLookupResult(await lookupOnline(code, mode));
   saveLookupCache(code, result, mode);
 
   res.json(result);
