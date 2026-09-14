@@ -6,8 +6,15 @@ function apiBaseUrl() {
   return String(process.env.SHOP_KOME_API_URL || process.env.SHOPFLOW_API_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '');
 }
 
+function normalizePath(path) {
+  let value = String(path || '');
+  if (value.startsWith('/api/')) value = value.slice(4);
+  if (value === '/api') value = '';
+  return value.startsWith('/') ? value : `/${value}`;
+}
+
 async function request(path, options = {}) {
-  const url = `${apiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`;
+  const url = `${apiBaseUrl()}${normalizePath(path)}`;
   const next = { ...options };
   if (next.body && typeof next.body !== 'string' && !(next.body instanceof Buffer)) {
     next.body = JSON.stringify(next.body);
@@ -39,7 +46,6 @@ async function request(path, options = {}) {
 }
 
 const apiRequest = request;
-
 async function health() { return request('/health'); }
 async function listProducts() { return request('/products'); }
 async function getProductById(id) { return request(`/products/${encodeURIComponent(id)}`); }
@@ -54,16 +60,13 @@ async function createProduct(input) {
       currency: input.currency || 'JPY',
       quantity: Number(input.stock ?? input.quantity ?? 0),
       image: input.image_url ?? input.image ?? null,
-      barcode: input.barcode ?? null,
+      barcode: input.barcode ?? input.code ?? null,
       sku: input.sku ?? null,
     },
   });
 }
 async function updateProduct(id, input) {
-  return request(`/products/${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    body: input,
-  });
+  return request(`/products/${encodeURIComponent(id)}`, { method: 'PUT', body: input });
 }
 async function changeInventory(productId, type, quantity, note) {
   return request(`/products/${encodeURIComponent(productId)}/inventory`, {
@@ -76,16 +79,4 @@ async function listInventoryTransactions(productId) {
   return request(`/inventory/transactions${qs}`);
 }
 
-module.exports = {
-  apiBaseUrl,
-  request,
-  apiRequest,
-  health,
-  listProducts,
-  getProductById,
-  findProductByCode,
-  createProduct,
-  updateProduct,
-  changeInventory,
-  listInventoryTransactions,
-};
+module.exports = { apiBaseUrl, request, apiRequest, health, listProducts, getProductById, findProductByCode, createProduct, updateProduct, changeInventory, listInventoryTransactions };
