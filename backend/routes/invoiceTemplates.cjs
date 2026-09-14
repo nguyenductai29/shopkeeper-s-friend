@@ -2,9 +2,11 @@
 const express=require('express');
 const { apiRequest }=require('../remoteDb.cjs');
 const router=express.Router();
+
 router.get('/',async(_req,res,next)=>{try{res.json(await apiRequest('/api/invoice-templates'));}catch(e){next(e)}});
-router.post('/',async(req,res,next)=>{try{res.json(await apiRequest('/api/invoice-templates',{method:'POST',body:req.body}));}catch(e){next(e)}});
-router.put('/:id',(_req,res)=>res.status(501).json({error:'invoice_template_update_pending_shared_api'}));
-router.delete('/:id',(_req,res)=>res.status(501).json({error:'invoice_template_delete_pending_shared_api'}));
-router.patch('/:id/default',(_req,res)=>res.status(501).json({error:'invoice_template_default_pending_shared_api'}));
+router.post('/',async(req,res,next)=>{try{res.json(await apiRequest('/api/invoice-templates',{method:'POST',body:req.body||{}}));}catch(e){next(e)}});
+router.put('/:id',async(req,res,next)=>{try{res.json(await apiRequest(`/api/invoice-templates/${encodeURIComponent(req.params.id)}`,{method:'PUT',body:req.body||{}}));}catch(e){next(e)}});
+router.delete('/:id',async(req,res,next)=>{try{res.json(await apiRequest(`/api/invoice-templates/${encodeURIComponent(req.params.id)}`,{method:'DELETE'}));}catch(e){next(e)}});
+router.patch('/:id/default',async(req,res,next)=>{try{res.json(await apiRequest(`/api/invoice-templates/${encodeURIComponent(req.params.id)}/default`,{method:'PATCH',body:{}}));}catch(e){next(e)}});
+
 module.exports=router;
