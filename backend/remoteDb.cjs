@@ -8,9 +8,14 @@ function apiBaseUrl() {
 
 async function request(path, options = {}) {
   const url = `${apiBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`;
+  const next = { ...options };
+  if (next.body && typeof next.body !== 'string' && !(next.body instanceof Buffer)) {
+    next.body = JSON.stringify(next.body);
+  }
   const response = await fetch(url, {
-    ...options,
+    ...next,
     headers: {
+      Accept: 'application/json',
       'Content-Type': 'application/json',
       ...(options.headers || {}),
     },
@@ -33,44 +38,39 @@ async function request(path, options = {}) {
   return body;
 }
 
-async function health() {
-  return request('/health');
-}
+const apiRequest = request;
 
-async function listProducts() {
-  return request('/products');
-}
-
-async function getProductById(id) {
-  return request(`/products/${encodeURIComponent(id)}`);
-}
-
-async function findProductByCode(code) {
-  const products = await listProducts();
-  return products.find((product) => String(product.code || '').toLowerCase() === String(code || '').toLowerCase()) || null;
-}
-
+async function health() { return request('/health'); }
+async function listProducts() { return request('/products'); }
+async function getProductById(id) { return request(`/products/${encodeURIComponent(id)}`); }
+async function findProductByCode(code) { return request(`/products/by-code/${encodeURIComponent(code)}`); }
 async function createProduct(input) {
   return request('/products', {
     method: 'POST',
-    body: JSON.stringify({
+    body: {
       name: input.name,
       salePrice: Number(input.sale_price ?? input.salePrice ?? 0),
       purchasePrice: Number(input.cost_price ?? input.purchasePrice ?? 0),
       currency: input.currency || 'JPY',
       quantity: Number(input.stock ?? input.quantity ?? 0),
       image: input.image_url ?? input.image ?? null,
-    }),
+      barcode: input.barcode ?? null,
+      sku: input.sku ?? null,
+    },
   });
 }
-
+async function updateProduct(id, input) {
+  return request(`/products/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: input,
+  });
+}
 async function changeInventory(productId, type, quantity, note) {
   return request(`/products/${encodeURIComponent(productId)}/inventory`, {
     method: 'POST',
-    body: JSON.stringify({ type, quantity: Number(quantity || 0), note: note || undefined }),
+    body: { type, amount: Number(quantity || 0), note: note || undefined, source: 'SHOPFLOW' },
   });
 }
-
 async function listInventoryTransactions(productId) {
   const qs = productId ? `?productId=${encodeURIComponent(productId)}` : '';
   return request(`/inventory/transactions${qs}`);
@@ -79,11 +79,13 @@ async function listInventoryTransactions(productId) {
 module.exports = {
   apiBaseUrl,
   request,
+  apiRequest,
   health,
   listProducts,
   getProductById,
   findProductByCode,
   createProduct,
+  updateProduct,
   changeInventory,
   listInventoryTransactions,
 };
