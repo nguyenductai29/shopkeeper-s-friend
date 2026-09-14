@@ -6,11 +6,12 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid, Legend,
 } from "recharts";
 import { format, subDays, startOfDay } from "date-fns";
-import { ordersStore, productsStore, type Order } from "@/lib/fileStore";
+import { ordersStore, productsStore, purchasesStore, type Order, type Purchase } from "@/lib/fileStore";
 import { RefreshButton } from "@/components/RefreshButton";
 
 export default function Dashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [productCount, setProductCount] = useState(0);
   const [unpaidCount, setUnpaidCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -20,12 +21,14 @@ export default function Dashboard() {
     if (!silent) setRefreshing(true);
     try {
       const since = subDays(new Date(), 29).toISOString();
-      const [recentOrders, count, unpaidCount] = await Promise.all([
+      const [recentOrders, purchaseList, count, unpaidCount] = await Promise.all([
         ordersStore.listSince(since),
+        purchasesStore.list(),
         productsStore.count(),
         ordersStore.unpaidCount(),
       ]);
       setOrders(recentOrders);
+      setPurchases(purchaseList.filter((purchase) => purchase.created_at >= since));
       setProductCount(count);
       setUnpaidCount(unpaidCount);
       setLastUpdated(new Date());
@@ -47,25 +50,33 @@ export default function Dashboard() {
   }, [loadDashboard]);
 
   const totalRevenue = orders.reduce((s, o) => s + Number(o.total), 0);
-  const totalCost = orders.reduce((s, o) => s + Number(o.cost_total), 0);
-  const profit = totalRevenue - totalCost;
+  const totalSalesCost = orders.reduce((s, o) => s + Number(o.cost_total), 0);
+  const totalPurchaseCost = purchases.reduce((s, purchase) => s + Number(purchase.total || 0), 0);
+  const profit = totalRevenue - totalSalesCost;
 
   const days = Array.from({ length: 30 }).map((_, i) => {
     const d = startOfDay(subDays(new Date(), 29 - i));
-    return { date: d, label: format(d, "dd/MM"), revenue: 0, cost: 0 };
+    return { date: d, label: format(d, "dd/MM"), revenue: 0, purchase: 0, salesCost: 0 };
   });
   orders.forEach((o) => {
     const day = format(startOfDay(new Date(o.created_at)), "dd/MM");
     const slot = days.find((d) => d.label === day);
     if (slot) {
       slot.revenue += Number(o.total);
-      slot.cost += Number(o.cost_total);
+      slot.salesCost += Number(o.cost_total);
+    }
+  });
+  purchases.forEach((purchase) => {
+    const day = format(startOfDay(new Date(purchase.created_at)), "dd/MM");
+    const slot = days.find((d) => d.label === day);
+    if (slot) {
+      slot.purchase += Number(purchase.total || 0);
     }
   });
 
   const stats = [
     { label: "Doanh thu (30d)", value: formatVND(totalRevenue), icon: Wallet, color: "text-primary", bg: "bg-accent" },
-    { label: "Tiền nhập (30d)", value: formatVND(totalCost), icon: TrendingDown, color: "text-warning", bg: "bg-warning/10" },
+    { label: "Tiền nhập (30d)", value: formatVND(totalPurchaseCost), icon: TrendingDown, color: "text-warning", bg: "bg-warning/10" },
     { label: "Lợi nhuận (30d)", value: formatVND(profit), icon: TrendingUp, color: "text-success", bg: "bg-success/10" },
     { label: "Số sản phẩm", value: formatNumber(productCount), icon: Package, color: "text-primary", bg: "bg-accent" },
     { label: "Đơn chưa TT", value: formatNumber(unpaidCount), icon: AlertCircle, color: "text-destructive", bg: "bg-destructive/10" },
@@ -99,7 +110,7 @@ export default function Dashboard() {
 
       <div className="grid flex-1 min-h-0 grid-rows-2 gap-3">
         <Card className="flex min-h-0 flex-col p-4 shadow-elegant">
-          <h3 className="mb-2 shrink-0 font-semibold">Doanh thu vs Chi phí nhập</h3>
+          <h3 className="mb-2 shrink-0 font-semibold">Doanh thu vs Tiền nhập</h3>
           <div className="min-h-0 flex-1">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={days}>
@@ -124,7 +135,7 @@ export default function Dashboard() {
                 />
                 <Legend />
                 <Area type="monotone" dataKey="revenue" name="Doanh thu" stroke="hsl(var(--primary))" fill="url(#rev)" strokeWidth={2} />
-                <Area type="monotone" dataKey="cost" name="Tiền nhập" stroke="hsl(var(--warning))" fill="url(#cost)" strokeWidth={2} />
+                <Area type="monotone" dataKey="purchase" name="Tiền nhập" stroke="hsl(var(--warning))" fill="url(#cost)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -134,7 +145,7 @@ export default function Dashboard() {
           <h3 className="mb-2 shrink-0 font-semibold">Lợi nhuận theo ngày</h3>
           <div className="min-h-0 flex-1">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={days.map((d) => ({ ...d, profit: d.revenue - d.cost }))}>
+              <BarChart data={days.map((d) => ({ ...d, profit: d.revenue - d.salesCost }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11}
