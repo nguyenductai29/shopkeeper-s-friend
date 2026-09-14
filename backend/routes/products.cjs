@@ -1,80 +1,77 @@
 'use strict';
 
 const express = require('express');
-const { now, saveDb, queryAll, queryGet, run, lastInsertId } = require('../db.cjs');
-const { notifyLowStock, shouldNotifyLowStock } = require('../notifications.cjs');
+const {
+  listProducts,
+  getProductById,
+  findProductByCode,
+  createProduct,
+  changeInventory,
+} = require('../remoteDb.cjs');
 
 const router = express.Router();
 
-router.get('/', (req, res) => {
-  res.json(queryAll(`SELECT * FROM products ORDER BY name`));
-});
-
-router.get('/by-code/:code', (req, res) => {
-  const row = queryGet(
-    `SELECT * FROM products WHERE LOWER(code) = LOWER(?)`,
-    [req.params.code]
-  );
-  res.json(row || null);
-});
-
-router.post('/upsert', (req, res) => {
-  const input = req.body;
-  const existing = queryGet(
-    `SELECT * FROM products WHERE LOWER(code) = LOWER(?)`,
-    [input.code]
-  );
-  if (existing) {
-    const stockAdd = input.addStock ?? input.stock;
-    const newStock = (existing.stock || 0) + Number(stockAdd || 0);
-    const updatedAt = now();
-    run(
-      `UPDATE products SET name=?, image_url=?, cost_price=?, sale_price=?, stock=?, updated_at=? WHERE id=?`,
-      [input.name, input.image_url ?? null, input.cost_price, input.sale_price, newStock, updatedAt, existing.id]
-    );
-    saveDb();
-    return res.json({ ...existing, name: input.name, image_url: input.image_url ?? null, cost_price: input.cost_price, sale_price: input.sale_price, stock: newStock, updated_at: updatedAt });
-  }
-  const timestamp = now();
-  const created = {
-    code: input.code,
-    name: input.name,
-    image_url: input.image_url ?? null,
-    cost_price: input.cost_price,
-    sale_price: input.sale_price,
-    stock: input.stock ?? 0,
-    created_at: timestamp,
-    updated_at: timestamp,
+function toLegacyProduct(product) {
+  if (!product) return null;
+  return {
+    id: product.id,
+    code: product.code,
+    name: product.name,
+    image_url: product.image ?? product.image_url ?? null,
+    cost_price: Number(product.purchasePrice ?? product.purchase_price ?? 0),
+    sale_price: Number(product.salePrice ?? product.sale_price ?? 0),
+    stock: Number(product.quantity ?? product.stock ?? 0),
+    currency: product.currency || 'JPY',
+    created_at: product.createdAt ?? product.created_at,
+    updated_at: product.updatedAt ?? product.updated_at,
   };
-  run(
-    `INSERT INTO products (code,name,image_url,cost_price,sale_price,stock,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`,
-    [created.code, created.name, created.image_url, created.cost_price, created.sale_price, created.stock, created.created_at, created.updated_at]
-  );
-  const id = lastInsertId();
-  saveDb();
-  res.json({ id, ...created });
+}
+
+router.get('/', async (_req, res, next) => {
+  try {
+    const rows = await listProducts();
+    res.json(rows.map(toLegacyProduct));
+  } catch (err) { next(err); }
 });
 
-router.patch('/:id/stock', (req, res) => {
-  const { stock } = req.body;
-  const updatedAt = now();
-  const previous = queryGet(`SELECT * FROM products WHERE id=?`, [req.params.id]);
-  const parsedStock = Number(stock);
-  const nextStock = Number.isFinite(parsedStock) ? Math.max(0, parsedStock) : 0;
-  run(
-    `UPDATE products SET stock=?, updated_at=? WHERE id=?`,
-    [nextStock, updatedAt, req.params.id]
-  );
-  saveDb();
-  const product = queryGet(`SELECT * FROM products WHERE id=?`, [req.params.id]);
-  if (
-    previous
-    && product
-    && shouldNotifyLowStock(previous.stock, product.stock)
-  ) {
-    notifyLowStock({ ...product, previous_stock: previous.stock }).catch((err) => console.error('[notify] Lỗi gửi thông báo tồn kho:', err));
-  }
-  res.json({ ok: true });
+router.get('/by-code/:code', async (req, res, next) => {
+  try {
+    res.json(toLegacyProduct(await findProductByCode(req.params.code)));
+  } catch (err) { next(err); }
+});
+
+router.post('/upsert', async (req, res, next) => {
+  try {
+    const input = req.body || {};
+    const existing = await findProductByCode(input.code);
+
+    if (existing) {
+      const stockAdd = Number(input.addStock ?? input.stock ?? 0) || 0;
+      if (stockAdd > 0) {
+        const updated = await changeInventory(existing.id, 'IMPORT', stockAdd, 'Nhập kho từ ShopFlow');
+        return res.json(toLegacyProduct(updated.product || updated));
+      }
+      return res.json(toLegacyProduct(existing));
+    }
+
+    const created = await createProduct(input);
+    res.json(toLegacyProduct(created));
+  } catch (err) { next(err); }
+});
+
+router.patch('/:id/stock', async (req, res, next) => {
+  try {
+    const product = await getProductById(req.params.id);
+    if (!product) return res.status(404).json({ error: 'product_not_found' });
+
+    const target = Math.max(0, Number(req.body?.stock ?? 0) || 0);
+    const current = Number(product.quantity ?? 0);
+    const delta = target - current;
+    if (delta === 0) return res.json({ ok: true });
+
+    await changeInventory(product.id, delta > 0 ? 'IMPORT' : 'EXPORT', Math.abs(delta), 'Điều chỉnh tồn kho từ ShopFlow');
+    res.json({ ok: true });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;
