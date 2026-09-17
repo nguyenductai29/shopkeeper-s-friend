@@ -12,6 +12,8 @@ import ImportPage from "./pages/Import";
 import InvoiceTemplates from "./pages/InvoiceTemplates";
 import PaymentQrs from "./pages/PaymentQrs";
 import Debts from "./pages/Debts";
+import Customers from "./pages/Customers";
+import Finance from "./pages/Finance";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound.tsx";
 
@@ -30,6 +32,8 @@ const App = () => (
               <Route path="/pos" element={<POS />} />
               <Route path="/sales" element={<Sales />} />
               <Route path="/import" element={<ImportPage />} />
+              <Route path="/customers" element={<Customers />} />
+              <Route path="/finance" element={<Finance />} />
               <Route path="/invoice-templates" element={<InvoiceTemplates />} />
               <Route path="/payment-qrs" element={<PaymentQrs />} />
               <Route path="/debts" element={<Debts />} />
