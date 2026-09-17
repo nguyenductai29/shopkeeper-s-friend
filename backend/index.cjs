@@ -33,6 +33,10 @@ app.use('/api/invoice-templates', require('./routes/invoiceTemplates.cjs'));
 app.use('/api/payment-qrs', require('./routes/paymentQrs.cjs'));
 app.use('/api/settings', require('./routes/settings.cjs'));
 app.use('/api/notifications', require('./routes/notifications.cjs'));
+app.use('/api/customers', require('./routes/storeFinance.cjs'));
+app.use('/api/payments', require('./routes/storeFinance.cjs'));
+app.use('/api/finance', require('./routes/storeFinance.cjs'));
+app.use('/api/dashboard', require('./routes/storeFinance.cjs'));
 
 app.use((err, _req, res, _next) => {
   console.error('[backend]', err);
