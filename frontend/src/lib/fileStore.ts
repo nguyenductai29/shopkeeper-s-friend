@@ -1,5 +1,4 @@
-// Async store backed by the Express/JSON-file server.
-// Mirrors the synchronous API of localStore.ts so pages can switch easily.
+// Async store backed by the shop Express proxy and shared PostgreSQL API.
 
 export type {
   Product,
@@ -45,8 +44,80 @@ export type NotificationTestResult = {
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options);
-  if (!res.ok) throw new Error(`API ${options?.method ?? 'GET'} ${path} lỗi: ${res.status}`);
+  if (!res.ok) {
+    let message = `API ${options?.method ?? 'GET'} ${path} lỗi: ${res.status}`;
+    try {
+      const body: unknown = await res.json();
+      if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' && body.error.trim()) {
+        message = body.error;
+      }
+    } catch {
+      // HTML and other non-JSON proxy responses use the HTTP status message.
+    }
+    throw new Error(message);
+  }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+function apiRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Dữ liệu API không hợp lệ');
+  }
+  return value as Record<string, unknown>;
+}
+
+function numeric(value: unknown, field: string): number {
+  const result = Number(value ?? 0);
+  if (!Number.isFinite(result)) throw new Error(`Dữ liệu số không hợp lệ: ${field}`);
+  return result;
+}
+
+function normalizeProduct(value: unknown): Product {
+  const row = apiRecord(value);
+  return {
+    ...row,
+    cost_price: numeric(row.cost_price, 'cost_price'),
+    sale_price: numeric(row.sale_price, 'sale_price'),
+    stock: numeric(row.stock, 'stock'),
+  } as Product;
+}
+
+function normalizePurchase(value: unknown): Purchase {
+  const row = apiRecord(value);
+  return {
+    ...row,
+    cost_price: numeric(row.cost_price ?? row.unit_cost, 'cost_price'),
+    sale_price: numeric(row.sale_price, 'sale_price'),
+    quantity: numeric(row.quantity, 'quantity'),
+    total: numeric(row.total, 'total'),
+  } as Purchase;
+}
+
+function normalizeOrder(value: unknown): Order {
+  const row = apiRecord(value);
+  return {
+    ...row,
+    total: numeric(row.total, 'total'),
+    cost_total: numeric(row.cost_total, 'cost_total'),
+    discount: numeric(row.discount, 'discount'),
+  } as Order;
+}
+
+function normalizeOrderItem(value: unknown): OrderItem {
+  const row = apiRecord(value);
+  return {
+    ...row,
+    cost_price: numeric(row.cost_price ?? row.unit_cost, 'cost_price'),
+    sale_price: numeric(row.sale_price ?? row.unit_price, 'sale_price'),
+    quantity: numeric(row.quantity, 'quantity'),
+    subtotal: numeric(row.subtotal ?? row.line_total, 'subtotal'),
+  } as OrderItem;
+}
+
+function normalizeRows<T>(value: unknown, normalize: (row: unknown) => T): T[] {
+  if (!Array.isArray(value)) throw new Error('Danh sách API không hợp lệ');
+  return value.map(normalize);
 }
 
 function json(body: unknown): RequestInit {
@@ -124,10 +195,11 @@ export async function canLoadImageUrl(url: string | null | undefined, timeoutMs 
 // ===== Products =====
 export const productsStore = {
   async list(): Promise<Product[]> {
-    return apiFetch<Product[]>('/products');
+    return normalizeRows(await apiFetch<unknown>('/products'), normalizeProduct);
   },
   async findByCode(code: string): Promise<Product | null> {
-    return apiFetch<Product | null>(`/products/by-code/${encodeURIComponent(code)}`);
+    const product = await apiFetch<unknown>(`/products/by-code/${encodeURIComponent(code)}`);
+    return product === null ? null : normalizeProduct(product);
   },
   async get(id: EntityId): Promise<Product | null> {
     const list = await this.list();
@@ -136,7 +208,7 @@ export const productsStore = {
   async upsertByCode(
     input: Omit<Product, 'id' | 'created_at' | 'updated_at'> & { addStock?: number },
   ): Promise<Product> {
-    return apiFetch<Product>('/products/upsert', { method: 'POST', ...json(input) });
+    return normalizeProduct(await apiFetch<unknown>('/products/upsert', { method: 'POST', ...json(input) }));
   },
   async updateStock(id: EntityId, newStock: number): Promise<void> {
     await apiFetch('/products/' + id + '/stock', { method: 'PATCH', ...json({ stock: newStock }) });
@@ -171,33 +243,33 @@ export const notificationStore = {
 // ===== Purchases =====
 export const purchasesStore = {
   async list(): Promise<Purchase[]> {
-    return apiFetch<Purchase[]>('/purchases');
+    return normalizeRows(await apiFetch<unknown>('/purchases'), normalizePurchase);
   },
   async add(p: Omit<Purchase, 'id' | 'created_at'>): Promise<Purchase> {
-    return apiFetch<Purchase>('/purchases', { method: 'POST', ...json(p) });
+    return normalizePurchase(await apiFetch<unknown>('/purchases', { method: 'POST', ...json(p) }));
   },
   async update(id: EntityId, patch: Partial<Pick<Purchase, 'cost_price' | 'sale_price' | 'quantity'>>): Promise<Purchase> {
-    return apiFetch<Purchase>(`/purchases/${id}`, { method: 'PUT', ...json(patch) });
+    return normalizePurchase(await apiFetch<unknown>(`/purchases/${id}`, { method: 'PUT', ...json(patch) }));
   },
 };
 
 // ===== Orders =====
 export const ordersStore = {
   async list(): Promise<Order[]> {
-    return apiFetch<Order[]>('/orders');
+    return normalizeRows(await apiFetch<unknown>('/orders'), normalizeOrder);
   },
   async listSince(iso: string): Promise<Order[]> {
-    return apiFetch<Order[]>(`/orders/since/${encodeURIComponent(iso)}`);
+    return normalizeRows(await apiFetch<unknown>(`/orders/since/${encodeURIComponent(iso)}`), normalizeOrder);
   },
   async unpaid(): Promise<Order[]> {
-    return apiFetch<Order[]>('/orders/unpaid');
+    return normalizeRows(await apiFetch<unknown>('/orders/unpaid'), normalizeOrder);
   },
   async unpaidCount(): Promise<number> {
     const list = await this.unpaid();
     return list.length;
   },
-  async create(o: Omit<Order, 'id' | 'created_at'>): Promise<Order> {
-    return apiFetch<Order>('/orders', { method: 'POST', ...json(o) });
+  async create(o: Omit<Order, 'id' | 'created_at'> & { items?: Omit<OrderItem, 'id' | 'order_id'>[] }): Promise<Order> {
+    return normalizeOrder(await apiFetch<unknown>('/orders', { method: 'POST', ...json(o) }));
   },
   async setPaid(id: EntityId, paid: boolean): Promise<void> {
     await apiFetch(`/orders/${id}/paid`, { method: 'PATCH', ...json({ paid }) });
@@ -207,20 +279,20 @@ export const ordersStore = {
 // ===== Order Items =====
 export const orderItemsStore = {
   async list(): Promise<OrderItem[]> {
-    return apiFetch<OrderItem[]>('/order-items');
+    return normalizeRows(await apiFetch<unknown>('/order-items'), normalizeOrderItem);
   },
   async forOrder(orderId: EntityId): Promise<OrderItem[]> {
-    return apiFetch<OrderItem[]>(`/order-items/for-order/${orderId}`);
+    return normalizeRows(await apiFetch<unknown>(`/order-items/for-order/${orderId}`), normalizeOrderItem);
   },
   async addMany(items: Omit<OrderItem, 'id'>[]): Promise<OrderItem[]> {
-    return apiFetch<OrderItem[]>('/order-items/bulk', { method: 'POST', ...json(items) });
+    return normalizeRows(await apiFetch<unknown>('/order-items/bulk', { method: 'POST', ...json(items) }), normalizeOrderItem);
   },
 };
 
 // ===== Invoice Templates =====
 export const invoiceTemplatesStore = {
   async list(): Promise<InvoiceTemplate[]> {
-    return apiFetch<InvoiceTemplate[]>('/invoice-templates');
+    return normalizeRows(await apiFetch<unknown>('/invoice-templates'), (row) => apiRecord(row) as InvoiceTemplate);
   },
   async create(t: Partial<InvoiceTemplate> & { name: string }): Promise<InvoiceTemplate> {
     return apiFetch<InvoiceTemplate>('/invoice-templates', { method: 'POST', ...json(t) });
@@ -239,7 +311,7 @@ export const invoiceTemplatesStore = {
 // ===== Payment QR templates =====
 export const paymentQrsStore = {
   async list(): Promise<PaymentQr[]> {
-    return apiFetch<PaymentQr[]>('/payment-qrs');
+    return normalizeRows(await apiFetch<unknown>('/payment-qrs'), (row) => apiRecord(row) as PaymentQr);
   },
   async create(input: Omit<PaymentQr, 'id' | 'created_at' | 'updated_at'>): Promise<PaymentQr> {
     return apiFetch<PaymentQr>('/payment-qrs', { method: 'POST', ...json(input) });

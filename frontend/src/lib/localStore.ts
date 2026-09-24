@@ -1,11 +1,14 @@
 // Simple localStorage-backed data store replacing Supabase.
 // All data lives in the user's browser only.
 
-export type EntityId = number;
+export type EntityId = number | string;
 
 export type Product = {
   id: EntityId;
   code: string;
+  barcode?: string | null;
+  sku?: string | null;
+  currency?: string;
   name: string;
   image_url: string | null;
   cost_price: number;
@@ -17,6 +20,7 @@ export type Product = {
 
 export type Purchase = {
   id: EntityId;
+  currency?: string;
   product_id: EntityId | null;
   product_code: string;
   product_name: string;
@@ -42,6 +46,7 @@ export type OrderItem = {
 
 export type Order = {
   id: EntityId;
+  currency?: string;
   customer_name: string | null;
   customer_phone: string | null;
   customer_address: string | null;
@@ -167,7 +172,7 @@ function migrateRows<T extends { id: unknown }>(rows: T[], key: string) {
   const map = new Map<string, EntityId>();
 
   const migrated = rows.map((row) => {
-    let id: EntityId;
+    let id: number;
     if (preserveIds) {
       id = Number(row.id);
     } else {
@@ -192,12 +197,12 @@ function migrateLegacyLocalStorageIds() {
   if (!canUseStorage()) return;
   if (localStorage.getItem(MIGRATION_KEY) === "done") return;
 
-  const products = read<any>(KEYS.products);
-  const purchases = read<any>(KEYS.purchases);
-  const orders = read<any>(KEYS.orders);
-  const orderItems = read<any>(KEYS.order_items);
-  const invoiceTemplates = read<any>(KEYS.invoice_templates);
-  const paymentQrs = read<any>(KEYS.payment_qrs);
+  const products = read<Product>(KEYS.products);
+  const purchases = read<Purchase>(KEYS.purchases);
+  const orders = read<Order>(KEYS.orders);
+  const orderItems = read<OrderItem>(KEYS.order_items);
+  const invoiceTemplates = read<InvoiceTemplate>(KEYS.invoice_templates);
+  const paymentQrs = read<PaymentQr>(KEYS.payment_qrs);
 
   const migratedProducts = migrateRows(products, KEYS.products);
   const migratedOrders = migrateRows(orders, KEYS.orders);

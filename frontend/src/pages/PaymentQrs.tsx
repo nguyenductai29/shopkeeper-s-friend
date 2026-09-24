@@ -37,11 +37,18 @@ function Inner() {
   const [editing, setEditing] = useState<Partial<PaymentQr> | null>(null);
   const [preview, setPreview] = useState<PaymentQr | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const load = async (showLoading = false) => {
     if (showLoading) setRefreshing(true);
     try {
       setItems(await paymentQrsStore.list());
+      setLoadError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không tải được VietQR";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       if (showLoading) setRefreshing(false);
     }
@@ -54,36 +61,51 @@ function Inner() {
   ), [editing]);
 
   const save = async () => {
-    if (!editing) return;
+    if (!editing || saving) return;
     const payload = normalizePaymentQr(editing);
     if (!payload.name) return toast.error("Cần nhập tên QR");
     if (!payload.bank_bin) return toast.error("Cần nhập mã ngân hàng hoặc BIN");
     if (!payload.account_no) return toast.error("Cần nhập số tài khoản");
 
-    if (editing.id) {
-      await paymentQrsStore.update(editing.id, payload);
-    } else {
-      await paymentQrsStore.create(payload);
+    setSaving(true);
+    try {
+      if (editing.id) {
+        await paymentQrsStore.update(editing.id, payload);
+      } else {
+        await paymentQrsStore.create(payload);
+      }
+      setEditing(null);
+      toast.success("Đã lưu VietQR");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không lưu được VietQR");
+    } finally {
+      setSaving(false);
     }
-    setEditing(null);
-    toast.success("Đã lưu VietQR");
-    load();
   };
 
   const remove = async (item: PaymentQr) => {
-    await paymentQrsStore.remove(item.id);
-    toast.success("Đã xoá VietQR");
-    load();
+    try {
+      await paymentQrsStore.remove(item.id);
+      toast.success("Đã xoá VietQR");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không xoá được VietQR");
+    }
   };
 
   const copyUrl = async (item: PaymentQr) => {
     const url = buildVietQrImageUrl(item, { amount: item.fixed_amount || 10000 });
-    await navigator.clipboard.writeText(url);
-    toast.success("Đã copy link QR");
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Đã copy link QR");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không sao chép được link QR");
+    }
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 p-4 sm:p-5">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden p-4 sm:p-5">
       <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
         <div>
           <p className="font-mono text-[10px] uppercase text-muted-foreground">Quản lý QR thanh toán dùng trong footer hóa đơn</p>
@@ -98,7 +120,8 @@ function Inner() {
       </div>
 
       <div className="grid min-h-0 flex-1 auto-rows-max gap-3 overflow-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
-        {items.length === 0 && (
+        {loadError && <div role="alert" className="col-span-full flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><span>{loadError}</span><Button size="sm" variant="outline" onClick={() => load(true)}>Thử lại</Button></div>}
+        {!loadError && items.length === 0 && (
           <div className="col-span-full grid h-56 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
             <div>
               <QrCode className="mx-auto mb-2 size-7" />
@@ -149,12 +172,12 @@ function Inner() {
       </div>
 
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-3xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
           <DialogHeader>
             <DialogTitle className="font-display">{editing?.id ? "Sửa VietQR" : "Tạo VietQR"}</DialogTitle>
           </DialogHeader>
           {editing && (
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="grid min-h-0 gap-4 overflow-auto md:grid-cols-[minmax(0,1fr)_220px]">
               <div className="space-y-3">
                 <div className="space-y-1.5">
                   <Label>Tên QR *</Label>
@@ -215,7 +238,7 @@ function Inner() {
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <Button variant="outline" onClick={() => setEditing(null)}>Huỷ</Button>
-                  <Button onClick={save}>Lưu</Button>
+                  <Button onClick={save} disabled={saving}>{saving ? "Đang lưu..." : "Lưu"}</Button>
                 </div>
               </div>
 
@@ -238,12 +261,12 @@ function Inner() {
       </Dialog>
 
       <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-sm grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
           <DialogHeader>
             <DialogTitle className="font-display">{preview?.name || "VietQR"}</DialogTitle>
           </DialogHeader>
           {preview && (
-            <div className="space-y-3">
+            <div className="min-h-0 space-y-3 overflow-auto">
               <div className="mx-auto flex size-72 max-w-full items-center justify-center rounded-md border bg-white p-3">
                 <img
                   src={buildVietQrImageUrl(preview, { amount: preview.fixed_amount || 10000 })}

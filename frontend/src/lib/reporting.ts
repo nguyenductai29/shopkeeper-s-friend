@@ -1,4 +1,4 @@
-import type { Order, OrderItem } from "./localStore";
+import type { EntityId, Order, OrderItem } from "./localStore";
 
 export type ReportPeriod = "day" | "week" | "month";
 export type PaymentFilter = "all" | "paid" | "unpaid";
@@ -63,7 +63,7 @@ export function buildSalesReport(
   const matchingOrderIds = productCode === "all"
     ? null
     : new Set(items.filter((item) => item.product_code === productCode).map((item) => item.order_id));
-  const itemsByOrder = new Map<number, OrderItem[]>();
+  const itemsByOrder = new Map<EntityId, OrderItem[]>();
   for (const item of items) itemsByOrder.set(item.order_id, [...(itemsByOrder.get(item.order_id) ?? []), item]);
 
   const filteredOrders = orders.filter((order) => {

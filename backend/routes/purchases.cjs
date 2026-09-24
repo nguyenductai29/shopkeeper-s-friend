@@ -11,7 +11,7 @@ router.post('/',async(req,res,next)=>{try{
     quantity:b.quantity??0,
     unit_cost:b.cost_price??b.unit_cost??0,
     sale_price:b.sale_price??0,
-    currency:b.currency||'JPY',
+    currency:b.currency,
     supplier_name:b.supplier_name??null,
     note:b.note??null,
   }}));

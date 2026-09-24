@@ -11,13 +11,16 @@ import {
 } from "lucide-react";
 
 import { RefreshButton } from "@/components/RefreshButton";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatNumber, formatVND } from "@/lib/format";
+import { productPricesInVnd } from "@/lib/currency";
 import {
   orderItemsStore,
   ordersStore,
   productsStore,
   purchasesStore,
+  settingsStore,
   type Order,
   type OrderItem,
   type Product,
@@ -99,6 +102,7 @@ function makeActivity(purchases: Purchase[], orders: Order[], orderItems: OrderI
 }
 
 export default function Inventory() {
+  const [activePane, setActivePane] = useState<"products" | "history">("products");
   const [products, setProducts] = useState<Product[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -114,14 +118,16 @@ export default function Inventory() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [productResult, purchaseResult, orderResult, orderItemResult] = await Promise.allSettled([
+      const [productResult, purchaseResult, orderResult, orderItemResult, settingsResult] = await Promise.allSettled([
         productsStore.list(),
         purchasesStore.list(),
         ordersStore.list(),
         orderItemsStore.list(),
+        settingsStore.get(),
       ]);
       if (productResult.status === "rejected") throw productResult.reason;
-      setProducts(productResult.value);
+      if (settingsResult.status === "rejected") throw settingsResult.reason;
+      setProducts(productResult.value.map((product) => productPricesInVnd(product, Number(settingsResult.value.jpy_to_vnd_rate))));
       setPurchases(purchaseResult.status === "fulfilled" ? purchaseResult.value : []);
       setOrders(orderResult.status === "fulfilled" ? orderResult.value : []);
       setOrderItems(orderItemResult.status === "fulfilled" ? orderItemResult.value : []);
@@ -173,9 +179,9 @@ export default function Inventory() {
   const activity = useMemo(() => makeActivity(purchases, orders, orderItems), [purchases, orders, orderItems]);
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-5">
-      <div className="mx-auto max-w-[1600px] space-y-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="h-full min-h-0 min-w-0 overflow-hidden p-3 sm:p-4">
+      <div className="mx-auto flex h-full min-h-0 max-w-[1600px] flex-col gap-3">
+        <div className="flex shrink-0 flex-wrap items-end justify-between gap-3">
           <div>
             <p className="font-mono text-[10px] uppercase text-muted-foreground">
               Kho hàng · {updatedAt ? `cập nhật ${updatedAt.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}` : "dữ liệu hiện tại"}
@@ -200,26 +206,30 @@ export default function Inventory() {
           </div>
         )}
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Tổng quan tồn kho">
+        <section className="grid shrink-0 grid-cols-[repeat(4,minmax(155px,1fr))] gap-3 overflow-x-auto pb-1" aria-label="Tổng quan tồn kho">
           {metrics.map(([label, value, caption, Icon], index) => (
-            <div key={label} className="rounded-lg border bg-card p-4">
+            <div key={label} className="min-w-0 rounded-lg border bg-card p-3">
               <div className="flex justify-between gap-2">
                 <p className="font-mono text-[10px] uppercase text-muted-foreground">{label}</p>
                 <Icon className={`size-4 ${index === 1 || index === 2 ? "text-primary" : "text-muted-foreground"}`} />
               </div>
-              <p className="mt-2 truncate font-display text-2xl font-extrabold" title={value}>{value}</p>
+              <p className="mt-1 truncate font-display text-xl font-extrabold" title={value}>{value}</p>
               <p className="text-[10px] text-muted-foreground">{caption}</p>
             </div>
           ))}
         </section>
 
-        <section className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="min-w-0 overflow-hidden rounded-lg border bg-card">
-            <div className="flex flex-wrap gap-2 border-b p-3">
+        <div className="flex shrink-0 gap-2 xl:hidden" aria-label="Nội dung tồn kho">
+          <Button size="sm" variant={activePane === "products" ? "default" : "outline"} aria-pressed={activePane === "products"} onClick={() => setActivePane("products")}>Tồn kho</Button>
+          <Button size="sm" variant={activePane === "history" ? "default" : "outline"} aria-pressed={activePane === "history"} onClick={() => setActivePane("history")}>Lịch sử nhập xuất</Button>
+        </div>
+        <section className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-3 overflow-hidden xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className={`${activePane === "products" ? "flex" : "hidden xl:flex"} min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border bg-card`}>
+            <div className="flex shrink-0 gap-2 overflow-x-auto border-b p-3">
               <label className="flex h-9 min-w-52 flex-1 items-center gap-2 rounded-md border bg-background px-3">
                 <Search className="size-4 shrink-0 text-muted-foreground" />
                 <input
-                  className="w-full bg-transparent text-sm outline-none"
+                  className="min-w-0 w-full bg-transparent text-sm outline-none"
                   aria-label="Tìm sản phẩm theo tên hoặc mã"
                   placeholder="Tìm tên hoặc mã sản phẩm…"
                   value={query}
@@ -227,7 +237,7 @@ export default function Inventory() {
                 />
               </label>
               <Select value={sort} onValueChange={(value) => setSort(value as SortOrder)}>
-                <SelectTrigger className="w-40 bg-background" aria-label="Sắp xếp sản phẩm">
+                <SelectTrigger className="w-40 shrink-0 bg-background" aria-label="Sắp xếp sản phẩm">
                   <SelectValue placeholder="Sắp xếp" />
                 </SelectTrigger>
                 <SelectContent>
@@ -237,7 +247,7 @@ export default function Inventory() {
                 </SelectContent>
               </Select>
               <Select value={status} onValueChange={(value) => setStatus(value as StockStatus | "all")}>
-                <SelectTrigger className="w-40 bg-background" aria-label="Lọc trạng thái tồn kho">
+                <SelectTrigger className="w-40 shrink-0 bg-background" aria-label="Lọc trạng thái tồn kho">
                   <SelectValue placeholder="Trạng thái" />
                 </SelectTrigger>
                 <SelectContent>
@@ -248,9 +258,9 @@ export default function Inventory() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="overflow-x-auto">
+            <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
               <table className="w-full min-w-[720px] text-left text-[12px]">
-                <thead className="bg-muted/60 font-mono text-[9px] uppercase text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-muted font-mono text-[9px] uppercase text-muted-foreground">
                   <tr>
                     <th scope="col" className="p-3">Sản phẩm</th>
                     <th scope="col">Giá nhập</th>
@@ -301,14 +311,15 @@ export default function Inventory() {
                 </tbody>
               </table>
             </div>
-            <div className="border-t px-3 py-2 font-mono text-[10px] text-muted-foreground">
+            <div className="shrink-0 border-t px-3 py-2 font-mono text-[10px] text-muted-foreground">
               Hiển thị {formatNumber(filteredProducts.length)} / {formatNumber(products.length)} mặt hàng
             </div>
           </div>
 
-          <aside className="self-start rounded-lg border bg-card p-4">
-            <h2 className="font-display text-[15px] font-bold">Lịch sử nhập xuất</h2>
-            <p className="mb-4 font-mono text-[10px] text-muted-foreground">Hoạt động gần nhất</p>
+          <aside className={`${activePane === "history" ? "flex" : "hidden xl:flex"} min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border bg-card p-3`}>
+            <h2 className="shrink-0 font-display text-[15px] font-bold">Lịch sử nhập xuất</h2>
+            <p className="mb-3 shrink-0 font-mono text-[10px] text-muted-foreground">Hoạt động gần nhất</p>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {historyWarning && (
               <p role="status" className="mb-4 rounded-md bg-primary/10 p-2 text-[11px] text-primary">
                 {historyWarning} Đang hiển thị dữ liệu có sẵn.
@@ -341,6 +352,7 @@ export default function Inventory() {
                 ))}
               </div>
             )}
+            </div>
           </aside>
         </section>
       </div>

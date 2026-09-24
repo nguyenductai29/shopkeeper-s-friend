@@ -5,6 +5,10 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "node --test backend/test/shared-api.test.cjs",
+    "test:frontend": "cd frontend && vitest run",
+    "typecheck": "tsc --noEmit -p frontend/tsconfig.app.json",
     "dev": "concurrently -k \"npm:dev:frontend\" \"npm:dev:electron\"",
     "dev:backend": "node backend/index.cjs",
     "dev:frontend": "cd frontend && vite",

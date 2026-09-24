@@ -26,6 +26,8 @@ function Inner() {
   const [editing, setEditing] = useState<Partial<InvoiceTemplate> | null>(null);
   const [preview, setPreview] = useState<InvoiceTemplate | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const load = async (showLoading = false) => {
     if (showLoading) setRefreshing(true);
@@ -36,6 +38,11 @@ function Inner() {
       ]);
       setItems(templateList);
       setPaymentQrs(qrList);
+      setLoadError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không tải được mẫu hoá đơn";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       if (showLoading) setRefreshing(false);
     }
@@ -43,31 +50,47 @@ function Inner() {
   useEffect(() => { load(); }, []);
 
   const save = async () => {
+    if (saving) return;
     if (!editing?.name) return toast.error("Cần nhập tên template");
-    if (editing.id) {
-      await invoiceTemplatesStore.update(editing.id, editing);
-    } else {
-      await invoiceTemplatesStore.create({ ...editing, name: editing.name });
+    setSaving(true);
+    try {
+      if (editing.id) {
+        await invoiceTemplatesStore.update(editing.id, editing);
+      } else {
+        await invoiceTemplatesStore.create({ ...editing, name: editing.name });
+      }
+      setEditing(null);
+      toast.success("Đã lưu");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không lưu được mẫu hoá đơn");
+    } finally {
+      setSaving(false);
     }
-    setEditing(null);
-    toast.success("Đã lưu");
-    load();
   };
 
   const setDefault = async (id: EntityId) => {
-    await invoiceTemplatesStore.setDefault(id);
-    toast.success("Đã đặt làm mặc định");
-    load();
+    try {
+      await invoiceTemplatesStore.setDefault(id);
+      toast.success("Đã đặt làm mặc định");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không đặt được mẫu mặc định");
+    }
   };
 
   const remove = async (id: EntityId) => {
-    await invoiceTemplatesStore.remove(id);
-    toast.success("Đã xoá");
-    load();
+    try {
+      await invoiceTemplatesStore.remove(id);
+      toast.success("Đã xoá");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không xoá được mẫu hoá đơn");
+    }
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 sm:p-5">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden p-4 sm:p-5">
       <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-[10px] uppercase text-muted-foreground">Tạo và quản lý template hoá đơn xuất ra</p>
@@ -82,7 +105,8 @@ function Inner() {
       </div>
 
       <div className="grid min-h-0 flex-1 auto-rows-max content-start gap-3 overflow-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
-        {items.length === 0 && (
+        {loadError && <div role="alert" className="col-span-full flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><span>{loadError}</span><Button size="sm" variant="outline" onClick={() => load(true)}>Thử lại</Button></div>}
+        {!loadError && items.length === 0 && (
           <div className="col-span-full grid h-56 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
             <div>
               <FileText className="mx-auto mb-2 size-7" />
@@ -134,10 +158,10 @@ function Inner() {
       </div>
 
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="max-h-[calc(100vh-2rem)] max-w-2xl overflow-y-auto">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-2xl grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
           <DialogHeader><DialogTitle className="font-display">{editing?.id ? "Sửa mẫu" : "Tạo mẫu mới"}</DialogTitle></DialogHeader>
           {editing && (
-            <div className="space-y-3">
+            <div className="min-h-0 space-y-3 overflow-auto">
               <div className="space-y-1.5"><Label>Tên mẫu *</Label><Input value={editing.name || ""} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5"><Label>Tên shop</Label><Input value={editing.shop_name || ""} onChange={(e) => setEditing({ ...editing, shop_name: e.target.value })} /></div>
@@ -150,7 +174,7 @@ function Inner() {
                 <Label>VietQR trong footer</Label>
                 <Select
                   value={editing.payment_qr_id ? String(editing.payment_qr_id) : "none"}
-                  onValueChange={(value) => setEditing({ ...editing, payment_qr_id: value === "none" ? null : Number(value) })}
+                  onValueChange={(value) => setEditing({ ...editing, payment_qr_id: value === "none" ? null : paymentQrs.find((qr) => String(qr.id) === value)?.id ?? null })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Không gắn QR" />
@@ -165,7 +189,7 @@ function Inner() {
               </div>
               <div className="flex justify-end gap-2 border-t pt-4">
                 <Button variant="outline" onClick={() => setEditing(null)}>Huỷ</Button>
-                <Button onClick={save}>Lưu</Button>
+                <Button onClick={save} disabled={saving}>{saving ? "Đang lưu..." : "Lưu"}</Button>
               </div>
             </div>
           )}
@@ -173,10 +197,10 @@ function Inner() {
       </Dialog>
 
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
-        <DialogContent className="max-h-[calc(100vh-2rem)] max-w-md overflow-y-auto">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-md grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
           <DialogHeader><DialogTitle className="font-display">Xem trước hoá đơn</DialogTitle></DialogHeader>
           {preview && (
-            <div className="space-y-1 rounded-md border bg-white p-6 font-mono text-sm text-black shadow-sm">
+            <div className="min-h-0 space-y-1 overflow-auto rounded-md border bg-white p-6 font-mono text-sm text-black shadow-sm">
               {(() => {
                 const qr = preview.payment_qr_id ? paymentQrs.find((item) => item.id === preview.payment_qr_id) : null;
                 const amount = qr?.fixed_amount || 350000;

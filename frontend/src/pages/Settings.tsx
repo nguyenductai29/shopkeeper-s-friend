@@ -61,11 +61,18 @@ function Inner() {
   const [s, setS] = useState<AppSettings | null>(null);
   const [testing, setTesting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const loadSettings = async (showLoading = false) => {
     if (showLoading) setRefreshing(true);
     try {
       setS(await settingsStore.get());
+      setLoadError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không tải được cài đặt";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       if (showLoading) setRefreshing(false);
     }
@@ -75,19 +82,29 @@ function Inner() {
 
   const saveSettings = async () => {
     if (!s) return;
-    const saved = await settingsStore.save(s);
+    const rate = Number(s.jpy_to_vnd_rate);
+    if (!Number.isFinite(rate) || rate <= 0) throw new Error("Tỷ giá JPY/VND phải là số lớn hơn 0");
+    const saved = await settingsStore.save({ ...s, jpy_to_vnd_rate: rate });
     setS(saved);
+    setLoadError(null);
     return saved;
   };
 
   const save = async () => {
-    const saved = await saveSettings();
-    if (!saved) return;
-    toast.success("Đã lưu cài đặt");
+    if (saving || testing) return;
+    setSaving(true);
+    try {
+      const saved = await saveSettings();
+      if (saved) toast.success("Đã lưu cài đặt");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không lưu được cài đặt");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const testNotifications = async () => {
-    if (testing) return;
+    if (testing || saving) return;
     setTesting(true);
     try {
       const saved = await saveSettings();
@@ -121,10 +138,10 @@ function Inner() {
     }
   };
 
-  if (!s) return <div className="p-4 text-sm text-muted-foreground sm:p-5">Đang tải...</div>;
+  if (!s) return <div className="h-full min-h-0 overflow-auto p-4 text-sm text-muted-foreground sm:p-5">{loadError ? <div role="alert" className="space-y-3"><p>{loadError}</p><Button onClick={() => loadSettings(true)} disabled={refreshing}>Thử lại</Button></div> : "Đang tải..."}</div>;
 
   return (
-    <div className="flex h-full min-h-0 max-w-5xl flex-col gap-4 overflow-hidden p-4 sm:p-5">
+    <div className="flex h-full min-h-0 min-w-0 max-w-5xl flex-col gap-4 overflow-hidden p-4 sm:p-5">
       <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
         <div>
           <p className="font-mono text-[10px] uppercase text-muted-foreground">Cài đặt thông báo và ứng dụng</p>
@@ -133,86 +150,90 @@ function Inner() {
         <RefreshButton loading={refreshing} onClick={() => loadSettings(true)} />
       </div>
 
-      <section
-        className="shrink-0 animate-rise rounded-lg border bg-card p-4 backdrop-blur-md"
-        style={{ animationDelay: "60ms" }}
-      >
-        <div className="mb-4 flex items-start gap-3">
-          <div className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
-            <Store className="size-4" />
+      {loadError && <div role="alert" className="flex shrink-0 items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><span>{loadError}</span><Button size="sm" variant="outline" onClick={() => loadSettings(true)}>Thử lại</Button></div>}
+      <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(0,1.3fr)] gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] lg:grid-rows-1">
+        <section
+          className="flex min-h-0 min-w-0 animate-rise flex-col overflow-hidden rounded-lg border bg-card p-4 backdrop-blur-md"
+          style={{ animationDelay: "60ms" }}
+        >
+          <div className="mb-4 flex shrink-0 items-start gap-3">
+            <div className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+              <Store className="size-4" />
+            </div>
+            <h2 className="self-center font-display text-[15px] font-bold">Thông tin cửa hàng</h2>
           </div>
-          <h2 className="self-center font-display text-[15px] font-bold">Thông tin cửa hàng</h2>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5"><Label className="text-[13px] font-semibold">Tên cửa hàng</Label><Input className="bg-background" value={s.shop_name || ""} onChange={(e) => setS({ ...s, shop_name: e.target.value })} /></div>
-          <div className="space-y-1.5"><Label className="text-[13px] font-semibold">Đơn vị tiền</Label><Input className="bg-background font-mono" value={s.currency} onChange={(e) => setS({ ...s, currency: e.target.value })} /></div>
-          <div className="space-y-1.5">
-            <Label className="text-[13px] font-semibold">Tỷ giá yên Nhật</Label>
-            <Input
-              type="number"
-              min={0}
-              step="0.01"
-              value={s.jpy_to_vnd_rate}
-              onChange={(e) => setS({ ...s, jpy_to_vnd_rate: Number(e.target.value) })}
-              placeholder="VD: 170"
-              className="bg-background font-mono"
-            />
-            <p className="font-mono text-[11px] text-muted-foreground">1 JPY = {s.jpy_to_vnd_rate || 0} VND</p>
+          <div className="grid min-h-0 content-start gap-3 overflow-auto pr-1 sm:grid-cols-2 lg:grid-cols-1">
+            <div className="space-y-1.5"><Label className="text-[13px] font-semibold">Tên cửa hàng</Label><Input className="bg-background" value={s.shop_name || ""} onChange={(e) => setS({ ...s, shop_name: e.target.value })} /></div>
+            <div className="space-y-1.5"><Label className="text-[13px] font-semibold">Đơn vị tiền</Label><Input className="bg-background font-mono" value={s.currency} onChange={(e) => setS({ ...s, currency: e.target.value })} /></div>
+            <div className="space-y-1.5">
+              <Label className="text-[13px] font-semibold">Tỷ giá yên Nhật</Label>
+              <Input
+                type="number"
+                min={0.01}
+                step="0.01"
+                value={s.jpy_to_vnd_rate}
+                onChange={(e) => setS({ ...s, jpy_to_vnd_rate: Number(e.target.value) })}
+                placeholder="VD: 170"
+                className="bg-background font-mono"
+              />
+              <p className="font-mono text-[11px] text-muted-foreground">1 JPY = {s.jpy_to_vnd_rate || 0} VND</p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section
-        className="flex min-h-0 flex-1 animate-rise flex-col overflow-hidden rounded-lg border bg-card p-4 backdrop-blur-md"
-        style={{ animationDelay: "120ms" }}
-      >
-        <div className="mb-4 flex shrink-0 items-start gap-3">
-          <div className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
-            <Hash className="size-4" />
+        <section
+          className="flex min-h-0 min-w-0 animate-rise flex-col overflow-hidden rounded-lg border bg-card p-4 backdrop-blur-md"
+          style={{ animationDelay: "120ms" }}
+        >
+          <div className="mb-4 flex shrink-0 items-start gap-3">
+            <div className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+              <Hash className="size-4" />
+            </div>
+            <div>
+              <h2 className="font-display text-[15px] font-bold">Discord webhook theo nghiệp vụ</h2>
+              <p className="font-mono text-[10px] text-muted-foreground">Mỗi dòng có thể trỏ tới một channel Discord khác nhau</p>
+            </div>
           </div>
-          <div>
-            <h2 className="font-display text-[15px] font-bold">Discord webhook theo nghiệp vụ</h2>
-            <p className="font-mono text-[10px] text-muted-foreground">Mỗi dòng có thể trỏ tới một channel Discord khác nhau</p>
-          </div>
-        </div>
-        <div className="grid min-h-0 flex-1 content-start gap-3 overflow-auto pr-1 md:grid-cols-2">
-          {DISCORD_CHANNELS.map(({ label, description, toggleKey, webhookKey, Icon }) => (
-            <div key={webhookKey} className="rounded-lg border bg-background/70 p-3">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-start gap-3">
-                  <div className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-primary">
-                    <Icon className="size-4" />
+          <div className="grid min-h-0 flex-1 content-start gap-3 overflow-auto pr-1 md:grid-cols-2 lg:grid-cols-1">
+            {DISCORD_CHANNELS.map(({ label, description, toggleKey, webhookKey, Icon }) => (
+              <div key={webhookKey} className="rounded-lg border bg-background/70 p-3">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-primary">
+                      <Icon className="size-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <Label htmlFor={toggleKey} className="cursor-pointer text-[13px] font-semibold">{label}</Label>
+                      <p className="text-[11px] text-muted-foreground">{description}</p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <Label htmlFor={toggleKey} className="cursor-pointer text-[13px] font-semibold">{label}</Label>
-                    <p className="text-[11px] text-muted-foreground">{description}</p>
-                  </div>
+                  <Switch
+                    id={toggleKey}
+                    checked={Boolean(s[toggleKey])}
+                    onCheckedChange={(value) => setS({ ...s, [toggleKey]: value })}
+                  />
                 </div>
-                <Switch
-                  id={toggleKey}
-                  checked={Boolean(s[toggleKey])}
-                  onCheckedChange={(value) => setS({ ...s, [toggleKey]: value })}
+                <Input
+                  placeholder="https://discord.com/api/webhooks/..."
+                  value={s[webhookKey] || ""}
+                  onChange={(event) => setS({ ...s, [webhookKey]: event.target.value })}
+                  className="bg-background font-mono text-xs md:text-xs"
                 />
               </div>
-              <Input
-                placeholder="https://discord.com/api/webhooks/..."
-                value={s[webhookKey] || ""}
-                onChange={(event) => setS({ ...s, [webhookKey]: event.target.value })}
-                className="bg-background font-mono text-xs md:text-xs"
-              />
-            </div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+
+      </div>
 
       <div className="flex shrink-0 flex-wrap justify-end gap-2">
-        <Button size="lg" variant="outline" onClick={testNotifications} disabled={testing}>
+        <Button size="lg" variant="outline" onClick={testNotifications} disabled={testing || saving}>
           <Send />
           {testing ? "Đang gửi..." : "Gửi thử"}
         </Button>
-        <Button size="lg" onClick={save}>
+        <Button size="lg" onClick={save} disabled={saving || testing}>
           <Save />
-          Lưu cài đặt
+          {saving ? "Đang lưu..." : "Lưu cài đặt"}
         </Button>
       </div>
     </div>

@@ -25,7 +25,7 @@ import { RefreshButton } from "@/components/RefreshButton";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { exportRowsToExcel } from "@/lib/exportExcel";
-import { formatVND } from "@/lib/format";
+import { formatCurrency, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   invoiceTemplatesStore,
@@ -108,6 +108,10 @@ function Inner() {
   });
   const [page, setPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [itemErrors, setItemErrors] = useState<Record<string, string>>({});
+  const [mobilePanel, setMobilePanel] = useState<"orders" | "detail">("orders");
+  const [currency, setCurrency] = useState("VND");
 
   const loadOrders = async (showLoading = false) => {
     if (showLoading) setRefreshing(true);
@@ -121,7 +125,13 @@ function Inner() {
       setTemplates(templateList);
       setPaymentQrs(qrList);
       setItems({});
+      setItemErrors({});
       setSelectedId((current) => (list.some((order) => order.id === current) ? current : list[0]?.id ?? null));
+      setLoadError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không tải được đơn hàng";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       if (showLoading) setRefreshing(false);
     }
@@ -140,14 +150,15 @@ function Inner() {
 
   const filteredOrders = useMemo(() => {
     const keyword = search.trim().toLowerCase();
+    const currencyOrders = orders.filter((order) => (order.currency || "VND").toUpperCase() === currency);
     const rows = keyword
-      ? orders.filter((order) => (
+      ? currencyOrders.filter((order) => (
           String(order.id).includes(keyword)
           || String(order.customer_name || "khách lẻ").toLowerCase().includes(keyword)
           || String(order.customer_phone || "").toLowerCase().includes(keyword)
           || String(order.customer_address || "").toLowerCase().includes(keyword)
         ))
-      : orders;
+      : currencyOrders;
 
     return [...rows].sort((a, b) => {
       const aValue = sort.key === "profit" ? profit(a) : a[sort.key];
@@ -155,7 +166,13 @@ function Inner() {
       const result = compareValues(aValue, bValue);
       return sort.direction === "asc" ? result : -result;
     });
-  }, [orders, search, sort]);
+  }, [orders, search, sort, currency]);
+
+  useEffect(() => {
+    if (!filteredOrders.some((order) => order.id === selectedId)) {
+      setSelectedId(filteredOrders[0]?.id ?? null);
+    }
+  }, [filteredOrders, selectedId]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -209,37 +226,48 @@ function Inner() {
     );
   };
 
-  const loadOrderItems = async (id: EntityId) => {
-    if (!items[String(id)]) {
-      const orderItems = await orderItemsStore.forOrder(id);
-      setItems((current) => ({ ...current, [String(id)]: orderItems }));
-      return orderItems;
-    }
-    return items[String(id)];
+  const retryOrderItems = (id: EntityId) => {
+    setItemErrors((current) => {
+      const next = { ...current };
+      delete next[String(id)];
+      return next;
+    });
   };
 
-  const openOrder = async (id: EntityId) => {
+  const openOrder = (id: EntityId) => {
     setSelectedId(id);
-    await loadOrderItems(id);
+    setMobilePanel("detail");
+    retryOrderItems(id);
   };
 
-  const openInvoice = async (id: EntityId) => {
-    setSelectedId(id);
+  const openInvoice = (id: EntityId) => {
+    openOrder(id);
     setInvoiceOrderId(id);
-    await loadOrderItems(id);
   };
 
   useEffect(() => {
-    if (!selectedId || items[String(selectedId)]) return;
+    if (!selectedId || items[String(selectedId)] || itemErrors[String(selectedId)]) return;
+    let active = true;
     orderItemsStore.forOrder(selectedId).then((orderItems) => {
-      setItems((current) => ({ ...current, [String(selectedId)]: orderItems }));
+      if (active) setItems((current) => ({ ...current, [String(selectedId)]: orderItems }));
+    }).catch((error: unknown) => {
+      if (!active) return;
+      const message = error instanceof Error ? error.message : "Không tải được chi tiết đơn hàng";
+      setItemErrors((current) => ({ ...current, [String(selectedId)]: message }));
+      toast.error(message);
     });
-  }, [selectedId, items]);
+    return () => { active = false; };
+  }, [selectedId, items, itemErrors]);
 
   const markPaid = async (order: Order) => {
-    await ordersStore.setPaid(order.id, true);
-    toast.success("Đã đánh dấu đã thanh toán");
-    await loadOrders();
+    try {
+      await ordersStore.setPaid(order.id, true);
+      setOrders((current) => current.map((item) => item.id === order.id ? { ...item, paid: true } : item));
+      toast.success("Đã đánh dấu đã thanh toán");
+      await loadOrders();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không cập nhật được thanh toán");
+    }
   };
 
   const exportSales = () => {
@@ -256,6 +284,7 @@ function Inner() {
         { header: "Địa chỉ", value: (row) => row.customer_address || "" },
         { header: "Giảm giá", value: (row) => orderDiscount(row) },
         { header: "Doanh thu", value: (row) => Number(row.total) },
+        { header: "Đơn vị tiền", value: (row) => row.currency || "VND" },
         { header: "Giá vốn", value: (row) => Number(row.cost_total) },
         { header: "Lợi nhuận", value: (row) => profit(row) },
         { header: "Thanh toán", value: (row) => (row.paid ? "Đã thanh toán" : "Chưa thanh toán") },
@@ -267,15 +296,15 @@ function Inner() {
   const rangeEnd = Math.min(pageStart + visibleOrders.length, filteredOrders.length);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 sm:p-5">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden p-4 sm:p-5 [@media(max-height:600px)]:gap-2 [@media(max-height:600px)]:p-3">
       <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1 basis-48">
           <p className="font-mono text-[10px] uppercase text-muted-foreground">
             Quản lý bán hàng · Theo dõi đơn hàng, doanh thu và trạng thái thanh toán
           </p>
           <h1 className="font-display text-[26px] font-extrabold">Đơn hàng</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <RefreshButton loading={refreshing} onClick={() => loadOrders(true)} />
           <Button variant="outline" onClick={exportSales} disabled={filteredOrders.length === 0}>
             <FileSpreadsheet /> Xuất Excel
@@ -283,16 +312,17 @@ function Inner() {
         </div>
       </div>
 
-      <section className="grid shrink-0 grid-cols-2 gap-3 xl:grid-cols-4">
+      {loadError && <div role="alert" className="flex shrink-0 items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"><span>{loadError}</span><Button size="sm" variant="outline" onClick={() => loadOrders(true)}>Thử lại</Button></div>}
+      {!(loadError && orders.length === 0) && <section className="grid shrink-0 auto-cols-[minmax(8rem,1fr)] grid-flow-col gap-3 overflow-x-auto">
         <MetricTile index={0} label="Số đơn" icon={ReceiptText} value={stats.orders} />
         <MetricTile
           index={1}
           label="Doanh thu"
           icon={TrendingUp}
-          value={formatVND(stats.revenue)}
+          value={formatCurrency(stats.revenue, currency)}
           valueClassName="text-primary"
         />
-        <MetricTile index={2} label="Lợi nhuận" icon={WalletCards} value={formatVND(stats.profit)} />
+        <MetricTile index={2} label="Lợi nhuận" icon={WalletCards} value={formatCurrency(stats.profit, currency)} />
         <MetricTile
           index={3}
           label="Chưa thanh toán"
@@ -300,12 +330,16 @@ function Inner() {
           value={stats.unpaid}
           valueClassName="text-destructive"
         />
-      </section>
+      </section>}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(20rem,3fr)_minmax(24rem,2fr)] gap-4 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_380px] xl:grid-rows-1 xl:overflow-hidden">
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card backdrop-blur-md">
+      <div className="flex shrink-0 gap-2 lg:hidden">
+        <Button size="sm" variant={mobilePanel === "orders" ? "default" : "outline"} aria-pressed={mobilePanel === "orders"} onClick={() => setMobilePanel("orders")}>Đơn hàng</Button>
+        <Button size="sm" variant={mobilePanel === "detail" ? "default" : "outline"} aria-pressed={mobilePanel === "detail"} onClick={() => setMobilePanel("detail")}>Chi tiết đơn</Button>
+      </div>
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border bg-card backdrop-blur-md", mobilePanel !== "orders" && "hidden lg:flex")}>
           <div className="flex shrink-0 flex-wrap gap-2 border-b p-3">
-            <label className="flex h-9 min-w-52 flex-1 items-center gap-2 rounded-md border bg-background px-3 focus-within:ring-1 focus-within:ring-ring">
+            <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border bg-background px-3 focus-within:ring-1 focus-within:ring-ring">
               <Search className="size-4 shrink-0 text-muted-foreground" />
               <input
                 value={search}
@@ -317,6 +351,7 @@ function Inner() {
                 placeholder="Tìm theo mã đơn, khách hàng, SĐT hoặc địa chỉ..."
               />
             </label>
+            <select aria-label="Đơn vị tiền" value={currency} onChange={(event) => { setCurrency(event.target.value); setPage(1); }} className="h-9 rounded-md border bg-background px-2 text-sm"><option value="VND">VND</option><option value="JPY">JPY</option></select>
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto">
@@ -335,7 +370,7 @@ function Inner() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {visibleOrders.length === 0 && (
+                {!loadError && visibleOrders.length === 0 && (
                   <tr>
                     <td colSpan={9} className="p-3">
                       <div className="grid h-56 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
@@ -360,10 +395,10 @@ function Inner() {
                       <p className="font-semibold">{order.customer_name || "Khách lẻ"}</p>
                       <p className="font-mono text-[9px] text-muted-foreground">{order.customer_phone || ""}</p>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono">{formatVND(orderDiscount(order))}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono font-semibold">{formatVND(order.total)}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono">{formatVND(order.cost_total)}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono">{formatVND(profit(order))}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono">{formatCurrency(orderDiscount(order), order.currency)}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono font-semibold">{formatCurrency(order.total, order.currency)}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono">{formatCurrency(order.cost_total, order.currency)}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono">{formatCurrency(profit(order), order.currency)}</td>
                     <td className="px-3 py-2.5">
                       {order.paid ? (
                         <span className="whitespace-nowrap rounded bg-success/10 px-2 py-1 text-[10px] font-semibold text-success">
@@ -394,7 +429,7 @@ function Inner() {
               </tbody>
             </table>
           </div>
-          <div className="flex shrink-0 flex-col justify-between gap-3 border-t px-3 py-2 sm:flex-row sm:items-center">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
             <div className="font-mono text-[10px] text-muted-foreground">
               Hiển thị {rangeStart}-{rangeEnd} / {filteredOrders.length}
             </div>
@@ -424,7 +459,7 @@ function Inner() {
           </div>
         </div>
 
-        <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card backdrop-blur-md">
+        <aside className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border bg-card backdrop-blur-md", mobilePanel !== "detail" && "hidden lg:flex")}>
           <div className="shrink-0 border-b p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -444,7 +479,7 @@ function Inner() {
           </div>
 
           {!selectedOrder ? (
-            <div className="min-h-0 flex-1 p-4">
+            <div className="min-h-0 flex-1 overflow-auto p-4">
               <div className="grid h-full min-h-40 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
                 <div>
                   <ReceiptText className="mx-auto mb-2 size-7" />
@@ -453,7 +488,7 @@ function Inner() {
               </div>
             </div>
           ) : (
-            <>
+            <div className="min-h-0 flex-1 overflow-auto">
               <div className="flex shrink-0 gap-3 border-b px-4 py-3">
                 <div className="grid size-8 shrink-0 place-items-center rounded-md bg-accent/35 text-accent-foreground">
                   <UserRound className="size-4" />
@@ -465,8 +500,9 @@ function Inner() {
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">
-                {selectedItems.length === 0 && (
+              <div className="space-y-3 p-4">
+                {itemErrors[String(selectedOrder.id)] && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{itemErrors[String(selectedOrder.id)]}</p><Button size="sm" variant="outline" onClick={() => retryOrderItems(selectedOrder.id)}>Thử lại</Button></div>}
+                {!itemErrors[String(selectedOrder.id)] && selectedItems.length === 0 && (
                   <div className="grid h-40 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
                     <div>
                       <Package className="mx-auto mb-2 size-7" />
@@ -483,7 +519,7 @@ function Inner() {
                       <p className="truncate text-[12px] font-semibold">{item.product_name}</p>
                       <p className="font-mono text-[10px] text-muted-foreground">{item.product_code} x {item.quantity}</p>
                     </div>
-                    <span className="shrink-0 text-right font-mono text-[12px] font-bold">{formatVND(item.subtotal)}</span>
+                    <span className="shrink-0 text-right font-mono text-[12px] font-bold">{formatCurrency(item.subtotal, selectedOrder.currency)}</span>
                   </div>
                 ))}
               </div>
@@ -492,35 +528,36 @@ function Inner() {
                 {orderDiscount(selectedOrder) > 0 && (
                   <>
                     <div className="flex justify-between text-[13px]">
-                      <span className="text-muted-foreground">Tạm tính</span><span className="font-mono">{formatVND(orderSubtotal(selectedOrder, selectedItems))}</span>
+                      <span className="text-muted-foreground">Tạm tính</span><span className="font-mono">{formatCurrency(orderSubtotal(selectedOrder, selectedItems), selectedOrder.currency)}</span>
                     </div>
                     <div className="flex justify-between text-[13px]">
-                      <span className="text-muted-foreground">Giảm giá</span><span className="font-mono">-{formatVND(orderDiscount(selectedOrder))}</span>
+                      <span className="text-muted-foreground">Giảm giá</span><span className="font-mono">-{formatCurrency(orderDiscount(selectedOrder), selectedOrder.currency)}</span>
                     </div>
                   </>
                 )}
                 <div className="flex justify-between text-[13px]">
-                  <span className="text-muted-foreground">Giá vốn</span><span className="font-mono">{formatVND(selectedOrder.cost_total)}</span>
+                  <span className="text-muted-foreground">Giá vốn</span><span className="font-mono">{formatCurrency(selectedOrder.cost_total, selectedOrder.currency)}</span>
                 </div>
                 <div className="flex justify-between text-[13px]">
-                  <span className="text-muted-foreground">Lợi nhuận</span><span className="font-mono">{formatVND(profit(selectedOrder))}</span>
+                  <span className="text-muted-foreground">Lợi nhuận</span><span className="font-mono">{formatCurrency(profit(selectedOrder), selectedOrder.currency)}</span>
                 </div>
                 <div className="flex items-end justify-between border-t pt-3">
-                  <span className="font-semibold">Tổng tiền</span><span className="font-display text-2xl font-extrabold text-primary">{formatVND(selectedOrder.total)}</span>
+                  <span className="font-semibold">Tổng tiền</span><span className="font-display text-2xl font-extrabold text-primary">{formatCurrency(selectedOrder.total, selectedOrder.currency)}</span>
                 </div>
               </div>
-            </>
+            </div>
           )}
         </aside>
       </div>
 
       <Dialog open={!!invoiceOrderId} onOpenChange={(open) => !open && setInvoiceOrderId(null)}>
-        <DialogContent className="max-h-[calc(100vh-2rem)] max-w-lg overflow-y-auto">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-lg grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
           <DialogHeader>
             <DialogTitle className="font-display">{invoiceOrder ? `Hoá đơn #${invoiceOrder.id}` : "Hoá đơn"}</DialogTitle>
           </DialogHeader>
           {invoiceOrder && (
-            <div className="rounded-md border bg-white p-5 font-mono text-sm text-black shadow-sm">
+            <div className="min-h-0 overflow-auto rounded-md border bg-white p-5 font-mono text-sm text-black shadow-sm">
+              {itemErrors[String(invoiceOrder.id)] && <div role="alert" className="mb-3 space-y-2 text-sm text-destructive"><p>{itemErrors[String(invoiceOrder.id)]}</p><Button size="sm" variant="outline" onClick={() => retryOrderItems(invoiceOrder.id)}>Thử lại</Button></div>}
               <div className="text-center">
                 <div className="text-lg font-bold">{invoiceTemplate?.shop_name || "ShopFlow"}</div>
                 {invoiceTemplate?.shop_address && <div className="text-xs">{invoiceTemplate.shop_address}</div>}
@@ -547,8 +584,8 @@ function Inner() {
                   <div key={item.id}>
                     <div className="font-medium">{item.product_name}</div>
                     <div className="flex justify-between text-xs">
-                      <span>{formatVND(item.sale_price)} x {item.quantity}</span>
-                      <span>{formatVND(item.subtotal)}</span>
+                      <span>{formatCurrency(item.sale_price, invoiceOrder.currency)} x {item.quantity}</span>
+                      <span>{formatCurrency(item.subtotal, invoiceOrder.currency)}</span>
                     </div>
                   </div>
                 ))}
@@ -558,17 +595,17 @@ function Inner() {
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span>Tạm tính</span>
-                    <span>{formatVND(orderSubtotal(invoiceOrder, invoiceItems))}</span>
+                    <span>{formatCurrency(orderSubtotal(invoiceOrder, invoiceItems), invoiceOrder.currency)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Giảm giá</span>
-                    <span>-{formatVND(orderDiscount(invoiceOrder))}</span>
+                    <span>-{formatCurrency(orderDiscount(invoiceOrder), invoiceOrder.currency)}</span>
                   </div>
                 </div>
               )}
               <div className="flex justify-between text-base font-bold">
                 <span>Tổng</span>
-                <span>{formatVND(invoiceOrder.total)}</span>
+                <span>{formatCurrency(invoiceOrder.total, invoiceOrder.currency)}</span>
               </div>
               <div className="mt-1 text-xs">
                 Thanh toán: {invoiceOrder.paid ? "Đã thanh toán" : "Chưa thanh toán"}
@@ -577,7 +614,8 @@ function Inner() {
               <div className="text-center text-xs italic">
                 {invoiceTemplate?.footer_note || "Cảm ơn quý khách!"}
               </div>
-              {invoicePaymentQr && (
+              {invoicePaymentQr && (invoiceOrder.currency || "VND").toUpperCase() !== "VND" && <p className="mt-3 text-center text-xs">VietQR chỉ hỗ trợ thanh toán VND.</p>}
+              {invoicePaymentQr && (invoiceOrder.currency || "VND").toUpperCase() === "VND" && (
                 <div className="mt-3 text-center">
                   {(() => {
                     const amount = invoiceQrAmount(invoicePaymentQr, invoiceOrder.total);

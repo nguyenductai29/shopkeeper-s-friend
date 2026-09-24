@@ -8,7 +8,8 @@ import { formatVND } from "@/lib/format";
 import { Banknote, Minus, Package, Plus, RotateCcw, ScanBarcode, Search, ShoppingBag, Trash2, WalletCards } from "lucide-react";
 import { toast } from "sonner";
 import { RefreshButton } from "@/components/RefreshButton";
-import { productsStore, ordersStore, orderItemsStore, type EntityId, type Product } from "@/lib/fileStore";
+import { productsStore, ordersStore, settingsStore, type EntityId, type Product } from "@/lib/fileStore";
+import { productPricesInVnd } from "@/lib/currency";
 
 type CartItem = Product & { qty: number };
 type StockFilter = "all" | "available" | "low" | "out";
@@ -42,10 +43,13 @@ export default function POS() {
   const [paid, setPaid] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [activePane, setActivePane] = useState<"products" | "cart">("products");
   const productInputRef = useRef<HTMLInputElement>(null);
 
   const focusProductInput = () => {
+    setActivePane("products");
     window.setTimeout(() => productInputRef.current?.focus(), 0);
   };
 
@@ -63,9 +67,10 @@ export default function POS() {
   const load = async (showLoading = false) => {
     if (showLoading) setRefreshing(true);
     try {
-      const list = await productsStore.list();
-      const sorted = list.sort((a, b) => a.name.localeCompare(b.name));
+      const [list, settings] = await Promise.all([productsStore.list(), settingsStore.get()]);
+      const sorted = list.map((product) => productPricesInVnd(product, Number(settings.jpy_to_vnd_rate))).sort((a, b) => a.name.localeCompare(b.name));
       setProducts(sorted);
+      setLoadError(null);
       setCart((current) => current
         .map((item) => {
           const latest = sorted.find((product) => product.id === item.id);
@@ -75,6 +80,10 @@ export default function POS() {
           return { ...latest, qty: Math.min(item.qty, stock) };
         })
         .filter((item): item is CartItem => Boolean(item)));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không tải được sản phẩm";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       if (showLoading) setRefreshing(false);
     }
@@ -86,7 +95,7 @@ export default function POS() {
 
   const filtered = products.filter((p) => {
     const keyword = query.trim().toLowerCase();
-    const matchesQuery = !keyword || p.name.toLowerCase().includes(keyword) || p.code.toLowerCase().includes(keyword);
+    const matchesQuery = !keyword || [p.name, p.code, p.barcode, p.sku].some((value) => value?.toLowerCase().includes(keyword));
     const stock = Number(p.stock || 0);
     const matchesStock = stockFilter === "all"
       || (stockFilter === "available" && stock > 0)
@@ -121,7 +130,7 @@ export default function POS() {
     const keyword = query.trim().toLowerCase();
     if (!keyword) return focusProductInput();
 
-    const exactCode = products.find((x) => x.code.toLowerCase() === keyword);
+    const exactCode = products.find((x) => [x.code, x.barcode, x.sku].some((value) => value?.toLowerCase() === keyword));
     const product = exactCode || (filtered.length === 1 ? filtered[0] : null);
     if (product) {
       if (addToCart(product)) {
@@ -153,6 +162,7 @@ export default function POS() {
   }, [subtotal]);
 
   const checkout = async () => {
+    if (saving) return;
     if (cart.length === 0) return toast.error("Giỏ hàng trống");
     setSaving(true);
     try {
@@ -167,7 +177,7 @@ export default function POS() {
         }
       }
 
-      const order = await ordersStore.create({
+      await ordersStore.create({
         customer_name: name || null,
         customer_phone: phone || null,
         customer_address: address || null,
@@ -176,9 +186,8 @@ export default function POS() {
         discount: discountAmount,
         paid,
         note: null,
-      });
-      await orderItemsStore.addMany(cart.map((x) => ({
-        order_id: order.id,
+        currency: "VND",
+        items: cart.map((x) => ({
         product_id: x.id,
         product_code: x.code,
         product_name: x.name,
@@ -187,25 +196,28 @@ export default function POS() {
         sale_price: x.sale_price,
         quantity: x.qty,
         subtotal: x.sale_price * x.qty,
-      })));
-      await Promise.all(cart.map((x) => {
-        const latest = latestById.get(String(x.id));
-        return productsStore.updateStock(x.id, Number(latest?.stock || 0) - x.qty);
-      }));
+        })),
+      });
       toast.success("Đã tạo đơn hàng");
       setCart([]); setDiscount(0); setName(""); setPhone(""); setAddress(""); setPaid(true);
       load();
       focusProductInput();
-    } catch {
-      toast.error("Lỗi tạo đơn");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Lỗi tạo đơn");
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="grid h-full min-h-0 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_400px] xl:grid-rows-[minmax(0,1fr)] xl:overflow-hidden">
-      <section className="flex min-h-[calc(100vh-4rem)] min-w-0 flex-col p-4 sm:p-5 xl:min-h-0">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+      <div className="flex shrink-0 gap-2 border-b px-4 py-2 xl:hidden" aria-label="Khu vực bán hàng">
+        <Button size="sm" variant={activePane === "products" ? "default" : "outline"} aria-pressed={activePane === "products"} onClick={focusProductInput}>Sản phẩm</Button>
+        <Button size="sm" variant={activePane === "cart" ? "default" : "outline"} aria-pressed={activePane === "cart"} onClick={() => setActivePane("cart")} className="min-w-0"><ShoppingBag />Giỏ hàng ({cart.reduce((count, item) => count + item.qty, 0)})</Button>
+      </div>
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] overflow-hidden xl:grid-cols-[minmax(0,1fr)_400px]">
+      <section className={`${activePane === "products" ? "flex" : "hidden xl:flex"} min-h-0 min-w-0 flex-col overflow-hidden p-3 sm:p-4`}>
+        {loadError && <div role="alert" className="mb-2 flex shrink-0 items-center justify-between gap-2 rounded-md bg-destructive/10 p-2 text-sm text-destructive"><span className="min-w-0 truncate">{loadError}</span><Button size="sm" variant="outline" onClick={() => load(true)} disabled={refreshing}>Thử lại</Button></div>}
         <div className="mb-4 flex shrink-0 flex-wrap items-end justify-between gap-3">
           <div>
             <p className="font-mono text-[10px] uppercase text-muted-foreground">Quầy bán hàng · Quét mã hoặc chọn sản phẩm</p>
@@ -298,7 +310,7 @@ export default function POS() {
         </div>
       </section>
 
-      <aside className="flex min-h-[600px] flex-col border-t bg-card/70 p-4 backdrop-blur-md sm:p-5 xl:min-h-0 xl:border-l xl:border-t-0">
+      <aside className={`${activePane === "cart" ? "flex" : "hidden xl:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-card/70 p-3 backdrop-blur-md sm:p-4 xl:border-l`}>
         <div className="flex shrink-0 items-center justify-between gap-3">
           <div>
             <p className="font-mono text-[10px] uppercase text-muted-foreground">Giỏ hiện tại</p>
@@ -315,7 +327,8 @@ export default function POS() {
           ><RotateCcw /></Button>
         </div>
 
-        <div className="my-4 min-h-28 flex-1 space-y-2 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="my-3 space-y-2">
           {cart.length === 0 && (
             <div className="grid h-56 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
               <div>
@@ -345,7 +358,7 @@ export default function POS() {
           ))}
         </div>
 
-        <div className="shrink-0 space-y-3 border-t pt-4">
+        <div className="space-y-3 border-t py-3">
           <details className="rounded-md border bg-background/70 px-3 py-2">
             <summary className="cursor-pointer text-[12px] font-semibold">Thông tin khách hàng (tuỳ chọn)</summary>
             <div className="mt-3 space-y-2.5">
@@ -389,14 +402,16 @@ export default function POS() {
             <Button type="button" variant={paid ? "default" : "outline"} className="h-auto flex-col py-2 text-[10px]" onClick={() => setPaid(true)}><Banknote />Đã thanh toán</Button>
             <Button type="button" variant={paid ? "outline" : "default"} className="h-auto flex-col py-2 text-[10px]" onClick={() => setPaid(false)}><WalletCards />Ghi công nợ</Button>
           </div>
-          <div className="grid grid-cols-[1fr_2fr] gap-2">
-            <Button type="button" variant="outline" onClick={focusProductInput}>Tiếp tục chọn</Button>
-            <Button type="button" disabled={!cart.length || saving} onClick={() => setConfirmOpen(true)}>
+        </div>
+        </div>
+          <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2 border-t pt-3">
+            <Button type="button" variant="outline" className="min-w-0 px-2 text-xs" onClick={focusProductInput}>Tiếp tục chọn</Button>
+            <Button type="button" className="min-w-0 px-2 text-xs" disabled={!cart.length || saving} onClick={() => setConfirmOpen(true)}>
               {saving ? "Đang xử lý..." : `${paid ? "Thanh toán" : "Tạo đơn nợ"} ${formatVND(total)}`}
             </Button>
           </div>
-        </div>
       </aside>
+      </div>
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>

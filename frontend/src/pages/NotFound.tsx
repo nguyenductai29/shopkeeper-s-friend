@@ -10,8 +10,8 @@ const NotFound = () => {
   }, [location.pathname]);
 
   return (
-    <div className="flex h-screen items-center justify-center overflow-hidden bg-background px-4">
-      <div className="animate-rise max-w-md text-center">
+    <div className="flex h-dvh min-h-0 overflow-hidden bg-background p-4">
+      <div className="animate-rise m-auto max-h-full w-full max-w-md overflow-auto text-center">
         <h1 className="font-display text-7xl font-extrabold text-foreground">404</h1>
         <h2 className="mt-4 font-display text-xl font-bold text-foreground">Không tìm thấy trang</h2>
         <p className="mt-2 text-sm text-muted-foreground">

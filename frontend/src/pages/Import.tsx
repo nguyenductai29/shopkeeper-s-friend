@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatVND } from "@/lib/format";
+import { formatCurrency } from "@/lib/format";
 import { AdminGate } from "@/components/AdminGate";
 import { ProductImage } from "@/components/ProductImage";
 import { RefreshButton } from "@/components/RefreshButton";
@@ -40,6 +40,7 @@ import { exportRowsToExcel } from "@/lib/exportExcel";
 type LookupStatus = "idle" | "loading" | "found" | "not_found" | "error";
 
 type Row = {
+  currency: string;
   key: string;
   product_id: EntityId | null;
   code: string;
@@ -125,6 +126,7 @@ function ImportPageInner() {
   const [saving, setSaving] = useState(false);
   const [backfillingImages, setBackfillingImages] = useState(false);
   const [refreshingPurchases, setRefreshingPurchases] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editingPurchase, setEditingPurchase] = useState<{
     id: EntityId;
     cost_price: number;
@@ -150,6 +152,11 @@ function ImportPageInner() {
     if (showLoading) setRefreshingPurchases(true);
     try {
       setPurchases(await purchasesStore.list());
+      setLoadError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không tải được lịch sử nhập hàng";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       if (showLoading) setRefreshingPurchases(false);
     }
@@ -240,7 +247,13 @@ function ImportPageInner() {
     const code = scan.trim();
     if (!code) return;
     const key = nextDraftKey();
-    const existingProduct = await productsStore.findByCode(code);
+    let existingProduct: Product | null;
+    try {
+      existingProduct = await productsStore.findByCode(code);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Không tìm được sản phẩm, vui lòng thử lại");
+      return;
+    }
     const shouldLookupOnline = !existingProduct
       || !existingProduct.image_url
       || isPlaceholderImageUrl(existingProduct.image_url)
@@ -250,6 +263,7 @@ function ImportPageInner() {
       {
         key,
         product_id: existingProduct?.id ?? null,
+        currency: existingProduct?.currency || "VND",
         code,
         name: existingProduct?.name || "",
         image_url: existingProduct?.image_url || "",
@@ -282,6 +296,7 @@ function ImportPageInner() {
       {
         key,
         product_id: null,
+        currency: "VND",
         code: makeManualProductCode(draftKeyRef.current),
         name: "",
         image_url: "",
@@ -294,12 +309,15 @@ function ImportPageInner() {
     ]);
   };
 
-  const update = (key: string, field: keyof Row, value: any) =>
+  const update = <K extends keyof Row>(key: string, field: K, value: Row[K]) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, [field]: value } : r)));
 
   const remove = (key: string) => setRows((rs) => rs.filter((r) => r.key !== key));
 
-  const totalCost = rows.reduce((sum, row) => sum + Number(row.cost_price) * Number(row.quantity), 0);
+  const totalCost = Object.entries(rows.reduce<Record<string, number>>((totals, row) => {
+    totals[row.currency] = (totals[row.currency] || 0) + row.cost_price * row.quantity;
+    return totals;
+  }, {})).map(([currency, amount]) => formatCurrency(amount, currency)).join(" + ");
 
   const handleSort = (key: SortKey) => {
     setSort((current) => ({
@@ -334,10 +352,13 @@ function ImportPageInner() {
   };
 
   const save = async () => {
+    if (saving) return;
     if (rows.length === 0) return toast.error("Chưa có hàng nào");
     if (rows.some((row) => row.lookup_status === "loading")) return toast.error("Đang tìm thông tin sản phẩm, vui lòng chờ");
     for (const row of rows) {
       if (!row.code || !row.name) return toast.error("Cần điền đủ mã & tên sản phẩm");
+      if (!Number.isInteger(row.quantity) || row.quantity <= 0) return toast.error("Số lượng phải là số nguyên lớn hơn 0");
+      if (![row.cost_price, row.sale_price].every((price) => Number.isFinite(price) && price >= 0)) return toast.error("Giá phải là số không âm");
     }
     setSaving(true);
     try {
@@ -348,8 +369,9 @@ function ImportPageInner() {
           image_url: row.image_url || null,
           cost_price: row.cost_price,
           sale_price: row.sale_price,
-          stock: row.quantity,
-          addStock: row.quantity,
+          currency: row.currency,
+          stock: 0,
+          addStock: 0,
         });
         await purchasesStore.add({
           product_id: product.id,
@@ -359,14 +381,17 @@ function ImportPageInner() {
           sale_price: row.sale_price,
           quantity: row.quantity,
           total: Number(row.cost_price) * Number(row.quantity),
+          currency: row.currency,
         });
+        // Keep only unfinished rows if a later request in this batch fails.
+        setRows((current) => current.filter((draft) => draft.key !== row.key));
       }
       toast.success(`Đã nhập ${rows.length} mặt hàng`);
-      setRows([]);
       await loadPurchases();
       setPage(1);
-    } catch {
-      toast.error("Lỗi khi lưu");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Lỗi khi lưu");
+      await loadPurchases();
     } finally {
       setSaving(false);
     }
@@ -384,6 +409,7 @@ function ImportPageInner() {
         { header: "Mã sản phẩm", value: "product_code" },
         { header: "Tên sản phẩm", value: "product_name" },
         { header: "Giá nhập", value: (row) => Number(row.cost_price) },
+        { header: "Đơn vị tiền", value: (row) => row.currency || "VND" },
         { header: "Giá bán", value: (row) => Number(row.sale_price) },
         { header: "Số lượng", value: (row) => Number(row.quantity) },
         { header: "Thành tiền", value: (row) => Number(row.total) },
@@ -482,7 +508,7 @@ function ImportPageInner() {
   const rangeEnd = Math.min(pageStart + visiblePurchases.length, sortedPurchases.length);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 sm:p-5">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden p-4 sm:p-5">
       <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
         <div>
           <p className="font-mono text-[10px] uppercase text-muted-foreground">Quét hoặc nhập mã, sau đó điền thông tin & lưu</p>
@@ -525,7 +551,7 @@ function ImportPageInner() {
         </Button>
       </form>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden">
         <section
           className="flex min-h-0 flex-1 animate-rise flex-col overflow-hidden rounded-lg border bg-card backdrop-blur-md"
           style={{ animationDelay: "120ms" }}
@@ -574,7 +600,7 @@ function ImportPageInner() {
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-2"><Input value={row.code} onChange={(e) => update(row.key, "code", e.target.value)} className="h-9 bg-background font-mono" /></td>
+                    <td className="px-3 py-2"><Input value={row.code} onChange={(e) => update(row.key, "code", e.target.value)} className="h-9 bg-background font-mono" /><span className="font-mono text-[10px] text-muted-foreground">Giá {row.currency}</span></td>
                     <td className="px-3 py-2">
                       <Input
                         ref={(element) => {
@@ -606,7 +632,7 @@ function ImportPageInner() {
                       />
                     </td>
                     <td className="px-3 py-2"><Input type="number" value={row.quantity} onChange={(e) => update(row.key, "quantity", Number(e.target.value))} className="h-9 bg-background font-mono" /></td>
-                    <td className="px-3 py-2 text-right font-mono font-semibold">{formatVND(row.cost_price * row.quantity)}</td>
+                    <td className="px-3 py-2 text-right font-mono font-semibold">{formatCurrency(row.cost_price * row.quantity, row.currency)}</td>
                     <td className="px-3 py-2">
                       <div className="flex flex-col items-start gap-1">
                         <span className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-[10px] font-semibold leading-tight ${LOOKUP_TONE[row.lookup_status]}`}>
@@ -646,7 +672,7 @@ function ImportPageInner() {
             <div className="flex shrink-0 flex-col justify-between gap-3 border-t p-3 sm:flex-row sm:items-center">
               <div className="flex items-baseline gap-3">
                 <span className="text-sm font-semibold">Tổng nhập</span>
-                <span className="font-display text-2xl font-extrabold text-primary">{formatVND(totalCost)}</span>
+                <span className="font-display text-2xl font-extrabold text-primary">{totalCost}</span>
               </div>
               <Button onClick={save} disabled={saving} size="lg">
                 <Save />
@@ -683,7 +709,8 @@ function ImportPageInner() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {visiblePurchases.length === 0 && (
+                {loadError && <tr><td colSpan={9} className="p-3"><div role="alert" className="flex items-center gap-3 text-sm text-destructive"><span>{loadError}</span><Button size="sm" variant="outline" onClick={() => loadPurchases(true)}>Thử lại</Button></div></td></tr>}
+                {!loadError && visiblePurchases.length === 0 && (
                   <tr>
                     <td colSpan={9} className="p-3">
                       <div className="grid h-40 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
@@ -699,7 +726,7 @@ function ImportPageInner() {
                   <tr key={purchase.id} className="hover:bg-muted/40">
                     <td className="p-3 font-mono font-semibold">#{purchase.id}</td>
                     <td className="p-3 font-mono text-muted-foreground">{formatDateTime(purchase.created_at)}</td>
-                    <td className="p-3 font-mono">{purchase.product_code}</td>
+                    <td className="p-3 font-mono">{purchase.product_code}<span className="block text-[10px] text-muted-foreground">Giá {purchase.currency || "VND"}</span></td>
                     <td className="p-3 font-semibold">{purchase.product_name}</td>
                     {editingPurchase?.id === purchase.id ? (
                       <>
@@ -731,7 +758,7 @@ function ImportPageInner() {
                           />
                         </td>
                         <td className="p-3 text-right font-mono font-semibold text-primary">
-                          {formatVND(editingPurchase.cost_price * editingPurchase.quantity)}
+                          {formatCurrency(editingPurchase.cost_price * editingPurchase.quantity, purchase.currency)}
                         </td>
                         <td className="px-3 py-2 text-right">
                           <div className="flex justify-end gap-1">
@@ -746,10 +773,10 @@ function ImportPageInner() {
                       </>
                     ) : (
                       <>
-                        <td className="p-3 text-right font-mono">{formatVND(purchase.cost_price)}</td>
-                        <td className="p-3 text-right font-mono">{formatVND(purchase.sale_price)}</td>
+                        <td className="p-3 text-right font-mono">{formatCurrency(purchase.cost_price, purchase.currency)}</td>
+                        <td className="p-3 text-right font-mono">{formatCurrency(purchase.sale_price, purchase.currency)}</td>
                         <td className="p-3 text-right font-mono">{purchase.quantity}</td>
-                        <td className="p-3 text-right font-mono font-semibold">{formatVND(purchase.total)}</td>
+                        <td className="p-3 text-right font-mono font-semibold">{formatCurrency(purchase.total, purchase.currency)}</td>
                         <td className="px-3 py-2 text-right">
                           <Button size="icon" variant="ghost" className="size-8" onClick={() => startEditPurchase(purchase)}>
                             <Pencil />

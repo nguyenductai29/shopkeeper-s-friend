@@ -25,6 +25,8 @@ function toLegacyProduct(product) {
   return {
     id: product.id,
     code: product.code,
+    barcode: product.barcode ?? null,
+    sku: product.sku ?? null,
     name: product.name,
     image_url: resolveImageUrl(product.image ?? product.image_url),
     cost_price: Number(product.purchasePrice ?? product.purchase_price ?? 0),

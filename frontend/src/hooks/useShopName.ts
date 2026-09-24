@@ -15,6 +15,9 @@ export function useShopName() {
 
     settingsStore.get().then((settings) => {
       if (mounted) setShopName(normalizeShopName(settings.shop_name));
+    }).catch(() => {
+      // The Settings screen reports the API error; keep the navigation usable.
+      if (mounted) setShopName(DEFAULT_SHOP_NAME);
     });
 
     const handleSettingsUpdated = (event: Event) => {
