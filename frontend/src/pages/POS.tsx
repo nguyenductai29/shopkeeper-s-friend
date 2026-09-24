@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { formatVND } from "@/lib/format";
-import { ScanLine, Trash2, Plus, Minus, ShoppingCart, Package } from "lucide-react";
+import { ScanBarcode, Trash2, Plus, Minus, ShoppingCart, ShoppingBag, Package } from "lucide-react";
 import { toast } from "sonner";
 import { ProductImage } from "@/components/ProductImage";
 import { RefreshButton } from "@/components/RefreshButton";
@@ -191,159 +191,186 @@ export default function POS() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-semibold">Bán hàng</h1>
-          <p className="text-muted-foreground text-sm mt-1">Chọn sản phẩm hoặc quét mã để thêm vào giỏ</p>
+    <div className="grid h-full min-h-0 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_400px] lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden">
+      {/* Products */}
+      <section className="flex min-h-0 min-w-0 flex-col gap-4 p-4 sm:p-5">
+        <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="font-mono text-[10px] uppercase text-muted-foreground">Chọn sản phẩm hoặc quét mã để thêm vào giỏ</p>
+            <h1 className="font-display text-[26px] font-extrabold">Bán hàng nhanh</h1>
+          </div>
+          <RefreshButton loading={refreshing} onClick={() => load(true)} />
         </div>
-        <RefreshButton loading={refreshing} onClick={() => load(true)} />
-      </div>
 
-      <div className="grid flex-1 min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_400px]">
-        {/* Products */}
-        <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
-          <form onSubmit={handleProductInputSubmit} className="shrink-0 rounded-md border bg-card p-2 shadow-elegant">
-            <div className="relative">
-              <ScanLine className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary" />
-              <Input
-                ref={productInputRef}
-                autoFocus
-                placeholder="Tìm sản phẩm hoặc quét mã vạch, Enter để thêm..."
-                className="h-11 pl-9"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onBlur={keepProductInputFocused}
-              />
+        <form onSubmit={handleProductInputSubmit} className="shrink-0">
+          <label className="flex h-11 items-center gap-2 rounded-md border bg-card px-3 ring-offset-background focus-within:ring-2 focus-within:ring-ring">
+            <ScanBarcode className="size-5 shrink-0 text-primary" />
+            <Input
+              ref={productInputRef}
+              autoFocus
+              placeholder="Tìm sản phẩm hoặc quét mã vạch, Enter để thêm..."
+              className="h-full border-0 bg-transparent px-0 py-0 text-sm shadow-none focus-visible:ring-0 md:text-sm"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onBlur={keepProductInputFocused}
+            />
+            <span className="hidden shrink-0 font-mono text-[9px] text-muted-foreground sm:block">ENTER để thêm</span>
+          </label>
+        </form>
+
+        <div className="-m-1 min-h-0 flex-1 overflow-y-auto p-1">
+          <div className="grid auto-rows-max grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] gap-3">
+          {filtered.length === 0 && (
+            <div className="col-span-full grid h-56 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
+              <div>
+                <Package className="mx-auto mb-2 size-7" />
+                <p className="text-sm">Chưa có sản phẩm</p>
+              </div>
             </div>
-          </form>
-
-          <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-card p-2 shadow-elegant">
-            <div className="grid h-full min-h-0 auto-rows-max grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {filtered.length === 0 && (
-              <Card className="col-span-full p-12 text-center text-muted-foreground">
-                <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                Chưa có sản phẩm
-              </Card>
-            )}
-            {filtered.map((p) => {
-              const outOfStock = Number(p.stock || 0) <= 0;
-              return (
-              <Card
-                key={p.id}
-                onClick={() => {
-                  addToCart(p);
-                  focusProductInput();
-                }}
-                className={`p-2 transition-all gradient-card ${
-                  outOfStock
-                    ? "cursor-not-allowed opacity-60"
-                    : "cursor-pointer hover:shadow-glow hover:border-primary"
-                }`}
-              >
-                <div className="relative mb-1.5 flex h-24 items-center justify-center overflow-hidden rounded-md bg-muted/70">
-                  {p.image_url ? (
-                    <ProductImage src={p.image_url} alt={p.name} className="h-full w-full object-contain p-1.5" iconClassName="h-6 w-6" />
-                  ) : (
-                    <Package className="h-6 w-6 text-muted-foreground/40" />
-                  )}
-                  {outOfStock && (
-                    <div className="absolute right-1 top-1 rounded bg-destructive px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground">
-                      Hết
-                    </div>
-                  )}
-                </div>
-                <div className="truncate text-[11px] text-muted-foreground">{p.code}</div>
-                <div className="line-clamp-2 min-h-8 text-xs font-medium leading-4">{p.name}</div>
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <div className="truncate text-xs font-semibold text-primary">{formatVND(p.sale_price)}</div>
-                  <div className={`shrink-0 text-[11px] ${outOfStock ? "text-destructive" : "text-muted-foreground"}`}>
-                    SL: {p.stock}
+          )}
+          {filtered.map((p) => {
+            const outOfStock = Number(p.stock || 0) <= 0;
+            const lowStock = !outOfStock && Number(p.stock || 0) <= 5;
+            return (
+            <Card
+              key={p.id}
+              onClick={() => {
+                addToCart(p);
+                focusProductInput();
+              }}
+              className={`group rounded-lg p-3 text-left shadow-none transition ${
+                outOfStock
+                  ? "cursor-not-allowed opacity-60"
+                  : "cursor-pointer hover:-translate-y-0.5 hover:border-primary hover:shadow-sm"
+              }`}
+            >
+              <div className="relative mb-2.5 flex h-24 items-center justify-center overflow-hidden rounded-md bg-muted/70">
+                {p.image_url ? (
+                  <ProductImage src={p.image_url} alt={p.name} className="h-full w-full object-contain p-1.5" iconClassName="size-6" />
+                ) : (
+                  <Package className="size-6 text-muted-foreground/40" />
+                )}
+                {outOfStock && (
+                  <div className="absolute right-1.5 top-1.5 rounded bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground">
+                    Hết
                   </div>
-                </div>
-              </Card>
-              );
-            })}
-            </div>
-          </div>
-        </div>
-
-        {/* Cart */}
-        <Card className="flex h-full min-h-0 flex-col overflow-hidden p-3 shadow-elegant">
-          <div className="mb-3 flex shrink-0 items-center gap-2">
-            <ShoppingCart className="w-4 h-4 text-primary" />
-            <h3 className="font-semibold">Giỏ hàng ({cart.length})</h3>
-          </div>
-
-          <div className="-mx-1 min-h-0 flex-1 space-y-2 overflow-auto px-1">
-            {cart.length === 0 && <div className="text-sm text-muted-foreground py-6 text-center">Chưa có sản phẩm</div>}
-            {cart.map((x) => (
-              <div key={x.id} className="flex items-center gap-2 p-2 rounded-md bg-muted/40">
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{x.name}</div>
-                  <div className="text-xs text-primary">{formatVND(x.sale_price)}</div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => updateQty(x.id, -1)}><Minus className="w-3 h-3" /></Button>
-                  <span className="w-7 text-center text-sm">{x.qty}</span>
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => updateQty(x.id, 1)} disabled={x.qty >= Number(x.stock || 0)}><Plus className="w-3 h-3" /></Button>
-                  <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => removeItem(x.id)}><Trash2 className="w-3 h-3" /></Button>
+                )}
+              </div>
+              <div className="mb-1.5 flex items-start justify-between gap-2">
+                <span className="truncate rounded bg-muted px-1.5 py-1 font-mono text-[9px]">{p.code}</span>
+                {!outOfStock && <Plus className="size-4 shrink-0 text-primary opacity-60 group-hover:opacity-100" />}
+              </div>
+              <div className="line-clamp-2 min-h-10 font-display text-sm font-bold leading-5">{p.name}</div>
+              <div className="mt-2 flex items-end justify-between gap-2">
+                <div className="truncate font-mono text-[13px] font-semibold">{formatVND(p.sale_price)}</div>
+                <div
+                  className={`shrink-0 text-[10px] ${
+                    outOfStock ? "font-semibold text-destructive" : lowStock ? "font-semibold text-primary" : "text-muted-foreground"
+                  }`}
+                >
+                  SL: {p.stock}
                 </div>
               </div>
-            ))}
+            </Card>
+            );
+          })}
           </div>
+        </div>
+      </section>
 
-          <div className="my-3 shrink-0 border-t" />
+      {/* Cart */}
+      <aside className="flex min-h-0 flex-col overflow-y-auto border-t bg-card/70 p-4 backdrop-blur-md sm:p-5 lg:border-l lg:border-t-0">
+        <div className="flex shrink-0 items-center justify-between gap-3">
+          <div>
+            <p className="font-mono text-[10px] uppercase text-muted-foreground">Giỏ hàng</p>
+            <h2 className="font-display text-xl font-extrabold">{cart.length} mặt hàng</h2>
+          </div>
+          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+            <ShoppingCart className="size-4" />
+          </div>
+        </div>
 
-          <div className="shrink-0 space-y-2">
-            <div>
-              <Label className="text-xs">Tên khách</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Nguyễn Văn A" />
+        <div className="-mx-1 my-4 min-h-28 flex-1 space-y-2 overflow-y-auto px-1">
+          {cart.length === 0 && (
+            <div className="grid h-full min-h-28 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
+              <div>
+                <ShoppingBag className="mx-auto mb-2 size-7" />
+                <p className="text-sm">Chưa có sản phẩm</p>
+              </div>
             </div>
-            <div>
-              <Label className="text-xs">Số điện thoại</Label>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="09xx..." />
+          )}
+          {cart.map((x) => (
+            <div key={x.id} className="rounded-lg border bg-background/70 p-3">
+              <div className="flex justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-semibold">{x.name}</div>
+                  <div className="font-mono text-[10px] text-muted-foreground">{formatVND(x.sale_price)}</div>
+                </div>
+                <Button size="icon" variant="ghost" className="size-7 shrink-0 text-destructive" onClick={() => removeItem(x.id)}><Trash2 /></Button>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="flex items-center rounded-md border">
+                  <Button size="icon" variant="ghost" className="size-7" onClick={() => updateQty(x.id, -1)}><Minus /></Button>
+                  <span className="w-8 text-center font-mono text-xs">{x.qty}</span>
+                  <Button size="icon" variant="ghost" className="size-7" onClick={() => updateQty(x.id, 1)} disabled={x.qty >= Number(x.stock || 0)}><Plus /></Button>
+                </div>
+                <span className="font-mono text-sm font-bold">{formatVND(x.sale_price * x.qty)}</span>
+              </div>
             </div>
-            <div>
-              <Label className="text-xs">Địa chỉ</Label>
-              <Textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2} />
+          ))}
+        </div>
+
+        <div className="shrink-0 space-y-2.5 border-t pt-4">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">Tên khách</Label>
+              <Input className="h-8" value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Nguyễn Văn A" />
             </div>
-            <div className="flex items-center justify-between bg-muted/40 rounded-md px-3 py-2">
-              <Label htmlFor="paid" className="text-sm cursor-pointer">Đã thanh toán</Label>
-              <Switch id="paid" checked={paid} onCheckedChange={setPaid} />
-            </div>
-            <div>
-              <Label className="text-xs">Giảm giá</Label>
-              <Input
-                type="text"
-                inputMode="numeric"
-                value={formatMoneyInput(discount)}
-                onChange={(e) => setDiscount(Math.min(parseMoneyInput(e.target.value), subtotal))}
-                placeholder="0"
-              />
+            <div className="space-y-1">
+              <Label className="text-[11px] text-muted-foreground">Số điện thoại</Label>
+              <Input className="h-8" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="09xx..." />
             </div>
           </div>
-
-          <div className="mt-3 shrink-0 space-y-1 border-t pt-3">
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>Tổng SP</span><span>{cart.reduce((s, x) => s + x.qty, 0)}</span>
-            </div>
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>Tạm tính</span><span>{formatVND(subtotal)}</span>
-            </div>
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>Giảm giá</span><span>-{formatVND(discountAmount)}</span>
-            </div>
-            <div className="flex justify-between text-lg font-semibold">
-              <span>Tổng tiền</span><span className="text-primary">{formatVND(total)}</span>
-            </div>
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">Địa chỉ</Label>
+            <Textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={2} />
           </div>
+          <div className="flex items-center justify-between rounded-md border bg-background/70 px-3 py-2">
+            <Label htmlFor="paid" className="cursor-pointer text-[13px] font-semibold">Đã thanh toán</Label>
+            <Switch id="paid" checked={paid} onCheckedChange={setPaid} />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-[13px] text-muted-foreground">Giảm giá</Label>
+            <Input
+              type="text"
+              inputMode="numeric"
+              className="h-8 w-40 text-right font-mono"
+              value={formatMoneyInput(discount)}
+              onChange={(e) => setDiscount(Math.min(parseMoneyInput(e.target.value), subtotal))}
+              placeholder="0"
+            />
+          </div>
+        </div>
 
-          <Button className="mt-3 w-full shrink-0" size="lg" onClick={checkout} disabled={saving}>
-            {saving ? "Đang xử lý..." : "Tạo đơn hàng"}
-          </Button>
-        </Card>
-      </div>
+        <div className="mt-3 shrink-0 space-y-1.5 border-t pt-3">
+          <div className="flex justify-between text-[13px]">
+            <span className="text-muted-foreground">Tổng SP</span><span className="font-mono">{cart.reduce((s, x) => s + x.qty, 0)}</span>
+          </div>
+          <div className="flex justify-between text-[13px]">
+            <span className="text-muted-foreground">Tạm tính</span><span className="font-mono">{formatVND(subtotal)}</span>
+          </div>
+          <div className="flex justify-between text-[13px]">
+            <span className="text-muted-foreground">Giảm giá</span><span className="font-mono">-{formatVND(discountAmount)}</span>
+          </div>
+          <div className="flex items-end justify-between border-t pt-2.5">
+            <span className="font-semibold">Tổng tiền</span><span className="font-display text-2xl font-extrabold text-primary">{formatVND(total)}</span>
+          </div>
+        </div>
+
+        <Button className="mt-3 w-full shrink-0" size="lg" onClick={checkout} disabled={saving}>
+          {saving ? "Đang xử lý..." : "Tạo đơn hàng"}
+        </Button>
+      </aside>
     </div>
   );
 }

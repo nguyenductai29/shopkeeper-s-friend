@@ -9,29 +9,24 @@ import {
   ChevronRight,
   Eye,
   FileSpreadsheet,
+  HandCoins,
   Package,
   ReceiptText,
   Search,
+  TrendingUp,
+  UserRound,
+  WalletCards,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
 import { ProductImage } from "@/components/ProductImage";
 import { RefreshButton } from "@/components/RefreshButton";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { exportRowsToExcel } from "@/lib/exportExcel";
 import { formatVND } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import {
   invoiceTemplatesStore,
   orderItemsStore,
@@ -70,6 +65,33 @@ function orderSubtotal(order: Order, items: OrderItem[]) {
 function compareValues(a: unknown, b: unknown) {
   if (typeof a === "number" && typeof b === "number") return a - b;
   return String(a ?? "").localeCompare(String(b ?? ""), "vi", { numeric: true, sensitivity: "base" });
+}
+
+function MetricTile({
+  label,
+  value,
+  icon: Icon,
+  index,
+  valueClassName,
+}: {
+  label: string;
+  value: ReactNode;
+  icon: LucideIcon;
+  index: number;
+  valueClassName?: string;
+}) {
+  return (
+    <div
+      className="animate-rise rounded-lg border bg-card p-3 backdrop-blur-md"
+      style={{ animationDelay: `${index * 60}ms` }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-mono text-[10px] uppercase text-muted-foreground">{label}</p>
+        <Icon className="size-4 shrink-0 text-primary" />
+      </div>
+      <p className={cn("mt-1.5 font-display text-xl font-extrabold", valueClassName)}>{value}</p>
+    </div>
+  );
 }
 
 function Inner() {
@@ -170,16 +192,20 @@ function Inner() {
   }) => {
     const Icon = sort.key === sortKey ? (sort.direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
     return (
-      <TableHead className={className}>
+      <th className={cn("px-3 py-2.5", className)}>
         <button
           type="button"
           onClick={() => handleSort(sortKey)}
-          className="flex w-full items-center gap-1 text-left font-medium hover:text-foreground"
+          className={cn(
+            "flex w-full items-center gap-1 uppercase transition-colors hover:text-foreground",
+            className.includes("text-right") ? "justify-end text-right" : "text-left",
+            sort.key === sortKey && "text-foreground",
+          )}
         >
           <span>{children}</span>
-          <Icon className="h-3.5 w-3.5 shrink-0" />
+          <Icon className="size-3 shrink-0" />
         </button>
-      </TableHead>
+      </th>
     );
   };
 
@@ -241,60 +267,62 @@ function Inner() {
   const rangeEnd = Math.min(pageStart + visibleOrders.length, filteredOrders.length);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold md:text-3xl">Quản lý bán hàng</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Theo dõi đơn hàng, doanh thu và trạng thái thanh toán</p>
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 sm:p-5">
+      <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-mono text-[10px] uppercase text-muted-foreground">
+            Quản lý bán hàng · Theo dõi đơn hàng, doanh thu và trạng thái thanh toán
+          </p>
+          <h1 className="font-display text-[26px] font-extrabold">Đơn hàng</h1>
         </div>
         <div className="flex gap-2">
           <RefreshButton loading={refreshing} onClick={() => loadOrders(true)} />
           <Button variant="outline" onClick={exportSales} disabled={filteredOrders.length === 0}>
-            <FileSpreadsheet className="mr-2 h-4 w-4" /> Xuất Excel
+            <FileSpreadsheet /> Xuất Excel
           </Button>
         </div>
       </div>
 
-      <div className="grid shrink-0 gap-3 sm:grid-cols-4">
-        <Card className="p-3">
-          <div className="text-xs text-muted-foreground">Số đơn</div>
-          <div className="mt-1 text-2xl font-semibold">{stats.orders}</div>
-        </Card>
-        <Card className="p-3">
-          <div className="text-xs text-muted-foreground">Doanh thu</div>
-          <div className="mt-1 text-2xl font-semibold text-primary">{formatVND(stats.revenue)}</div>
-        </Card>
-        <Card className="p-3">
-          <div className="text-xs text-muted-foreground">Lợi nhuận</div>
-          <div className="mt-1 text-2xl font-semibold">{formatVND(stats.profit)}</div>
-        </Card>
-        <Card className="p-3">
-          <div className="text-xs text-muted-foreground">Chưa thanh toán</div>
-          <div className="mt-1 text-2xl font-semibold text-destructive">{stats.unpaid}</div>
-        </Card>
-      </div>
+      <section className="grid shrink-0 grid-cols-2 gap-3 xl:grid-cols-4">
+        <MetricTile index={0} label="Số đơn" icon={ReceiptText} value={stats.orders} />
+        <MetricTile
+          index={1}
+          label="Doanh thu"
+          icon={TrendingUp}
+          value={formatVND(stats.revenue)}
+          valueClassName="text-primary"
+        />
+        <MetricTile index={2} label="Lợi nhuận" icon={WalletCards} value={formatVND(stats.profit)} />
+        <MetricTile
+          index={3}
+          label="Chưa thanh toán"
+          icon={HandCoins}
+          value={stats.unpaid}
+          valueClassName="text-destructive"
+        />
+      </section>
 
-      <Card className="shrink-0 p-3 shadow-elegant">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
-            }}
-            className="pl-9"
-            placeholder="Tìm theo mã đơn, khách hàng, SĐT hoặc địa chỉ..."
-          />
-        </div>
-      </Card>
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(20rem,3fr)_minmax(24rem,2fr)] gap-4 overflow-y-auto xl:grid-cols-[minmax(0,1fr)_380px] xl:grid-rows-1 xl:overflow-hidden">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card backdrop-blur-md">
+          <div className="flex shrink-0 flex-wrap gap-2 border-b p-3">
+            <label className="flex h-9 min-w-52 flex-1 items-center gap-2 rounded-md border bg-background px-3 focus-within:ring-1 focus-within:ring-ring">
+              <Search className="size-4 shrink-0 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+                className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                placeholder="Tìm theo mã đơn, khách hàng, SĐT hoặc địa chỉ..."
+              />
+            </label>
+          </div>
 
-      <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <Card className="flex min-h-0 flex-col overflow-hidden shadow-elegant">
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="min-w-[1040px]">
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
+            <table className="w-full min-w-[1040px] text-left text-[12px]">
+              <thead className="sticky top-0 z-10 bg-muted font-mono text-[9px] uppercase text-muted-foreground">
+                <tr>
                   <SortableHead sortKey="id" className="w-20">ID</SortableHead>
                   <SortableHead sortKey="created_at" className="w-40">Thời gian</SortableHead>
                   <SortableHead sortKey="customer_name">Khách hàng</SortableHead>
@@ -303,173 +331,196 @@ function Inner() {
                   <SortableHead sortKey="cost_total" className="w-32 text-right">Giá vốn</SortableHead>
                   <SortableHead sortKey="profit" className="w-32 text-right">Lãi</SortableHead>
                   <SortableHead sortKey="paid" className="w-32">Trạng thái</SortableHead>
-                  <TableHead className="w-24 text-right">Chi tiết</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+                  <th className="w-24 px-3 py-2.5 text-right">Chi tiết</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
                 {visibleOrders.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
-                      <ReceiptText className="mx-auto mb-2 h-10 w-10 opacity-40" />
-                      Chưa có đơn hàng.
-                    </TableCell>
-                  </TableRow>
+                  <tr>
+                    <td colSpan={9} className="p-3">
+                      <div className="grid h-56 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
+                        <div>
+                          <ReceiptText className="mx-auto mb-2 size-7" />
+                          <p className="text-sm">Chưa có đơn hàng.</p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
                 )}
                 {visibleOrders.map((order) => (
-                  <TableRow
+                  <tr
                     key={order.id}
                     data-state={selectedId === order.id ? "selected" : undefined}
-                    className="cursor-pointer"
+                    className="cursor-pointer transition-colors hover:bg-muted/40 data-[state=selected]:bg-primary/8"
                     onClick={() => openOrder(order.id)}
                   >
-                    <TableCell className="font-medium">#{order.id}</TableCell>
-                    <TableCell>{formatDateTime(order.created_at)}</TableCell>
-                    <TableCell>
-                      <div className="font-medium">{order.customer_name || "Khách lẻ"}</div>
-                      <div className="text-xs text-muted-foreground">{order.customer_phone || ""}</div>
-                    </TableCell>
-                    <TableCell className="text-right">{formatVND(orderDiscount(order))}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatVND(order.total)}</TableCell>
-                    <TableCell className="text-right">{formatVND(order.cost_total)}</TableCell>
-                    <TableCell className="text-right">{formatVND(profit(order))}</TableCell>
-                    <TableCell>
+                    <td className="px-3 py-2.5 font-mono font-semibold">#{order.id}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 font-mono">{formatDateTime(order.created_at)}</td>
+                    <td className="px-3 py-2.5">
+                      <p className="font-semibold">{order.customer_name || "Khách lẻ"}</p>
+                      <p className="font-mono text-[9px] text-muted-foreground">{order.customer_phone || ""}</p>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono">{formatVND(orderDiscount(order))}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono font-semibold">{formatVND(order.total)}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono">{formatVND(order.cost_total)}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono">{formatVND(profit(order))}</td>
+                    <td className="px-3 py-2.5">
                       {order.paid ? (
-                        <Badge variant="secondary">Đã TT</Badge>
+                        <span className="whitespace-nowrap rounded bg-success/10 px-2 py-1 text-[10px] font-semibold text-success">
+                          Đã TT
+                        </span>
                       ) : (
-                        <Badge variant="destructive">Chưa TT</Badge>
+                        <span className="whitespace-nowrap rounded bg-destructive/10 px-2 py-1 text-[10px] font-semibold text-destructive">
+                          Chưa TT
+                        </span>
                       )}
-                    </TableCell>
-                    <TableCell className="text-right">
+                    </td>
+                    <td className="px-3 py-1.5 text-right">
                       <Button
                         size="icon"
                         variant="ghost"
+                        className="size-8"
                         onClick={(event) => {
                           event.stopPropagation();
                           openInvoice(order.id);
                         }}
                         title="Xem hoá đơn"
                       >
-                        <Eye className="h-4 w-4" />
+                        <Eye />
                       </Button>
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
+              </tbody>
+            </table>
           </div>
-          <div className="flex shrink-0 flex-col justify-between gap-3 border-t px-4 py-2 sm:flex-row sm:items-center">
-            <div className="text-sm text-muted-foreground">
+          <div className="flex shrink-0 flex-col justify-between gap-3 border-t px-3 py-2 sm:flex-row sm:items-center">
+            <div className="font-mono text-[10px] text-muted-foreground">
               Hiển thị {rangeStart}-{rangeEnd} / {filteredOrders.length}
             </div>
             <div className="flex items-center gap-2">
               <Button
                 size="icon"
                 variant="outline"
+                className="size-8"
                 onClick={() => setPage((value) => Math.max(1, value - 1))}
                 disabled={currentPage <= 1}
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft />
               </Button>
-              <div className="min-w-24 text-center text-sm">
+              <div className="min-w-24 text-center font-mono text-[11px]">
                 Trang {currentPage} / {totalPages}
               </div>
               <Button
                 size="icon"
                 variant="outline"
+                className="size-8"
                 onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
                 disabled={currentPage >= totalPages}
               >
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight />
               </Button>
             </div>
           </div>
-        </Card>
+        </div>
 
-        <Card className="flex min-h-0 flex-col overflow-hidden shadow-elegant">
-          <div className="shrink-0 border-b p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="font-semibold">
+        <aside className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card backdrop-blur-md">
+          <div className="shrink-0 border-b p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="font-display text-[15px] font-bold">
                   {selectedOrder ? `Đơn #${selectedOrder.id}` : "Chi tiết đơn"}
-                </div>
-                <div className="text-xs text-muted-foreground">
+                </h2>
+                <p className="font-mono text-[10px] text-muted-foreground">
                   {selectedOrder ? formatDateTime(selectedOrder.created_at) : "Chọn một đơn để xem"}
-                </div>
+                </p>
               </div>
               {selectedOrder && !selectedOrder.paid && (
                 <Button size="sm" onClick={() => markPaid(selectedOrder)}>
-                  <Check className="mr-1 h-4 w-4" /> Đã TT
+                  <Check /> Đã TT
                 </Button>
               )}
             </div>
           </div>
 
           {!selectedOrder ? (
-            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              Chưa chọn đơn hàng
+            <div className="min-h-0 flex-1 p-4">
+              <div className="grid h-full min-h-40 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
+                <div>
+                  <ReceiptText className="mx-auto mb-2 size-7" />
+                  <p className="text-sm">Chưa chọn đơn hàng</p>
+                </div>
+              </div>
             </div>
           ) : (
             <>
-              <div className="shrink-0 space-y-1 border-b p-3 text-sm">
-                <div className="font-medium">{selectedOrder.customer_name || "Khách lẻ"}</div>
-                {selectedOrder.customer_phone && <div className="text-muted-foreground">{selectedOrder.customer_phone}</div>}
-                {selectedOrder.customer_address && <div className="text-muted-foreground">{selectedOrder.customer_address}</div>}
+              <div className="flex shrink-0 gap-3 border-b px-4 py-3">
+                <div className="grid size-8 shrink-0 place-items-center rounded-md bg-accent/35 text-accent-foreground">
+                  <UserRound className="size-4" />
+                </div>
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <p className="text-[13px] font-semibold">{selectedOrder.customer_name || "Khách lẻ"}</p>
+                  {selectedOrder.customer_phone && <p className="font-mono text-[11px] text-muted-foreground">{selectedOrder.customer_phone}</p>}
+                  {selectedOrder.customer_address && <p className="text-[11px] text-muted-foreground">{selectedOrder.customer_address}</p>}
+                </div>
               </div>
 
-              <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
+              <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">
                 {selectedItems.length === 0 && (
-                  <div className="py-8 text-center text-sm text-muted-foreground">
-                    <Package className="mx-auto mb-2 h-8 w-8 opacity-40" />
-                    Chưa tải chi tiết
+                  <div className="grid h-40 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
+                    <div>
+                      <Package className="mx-auto mb-2 size-7" />
+                      <p className="text-sm">Chưa tải chi tiết</p>
+                    </div>
                   </div>
                 )}
                 {selectedItems.map((item) => (
-                  <div key={item.id} className="flex gap-2 rounded-md bg-muted/40 p-2">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded bg-background">
-                      <ProductImage src={item.image_url} alt={item.product_name} className="h-full w-full object-cover" />
+                  <div key={item.id} className="flex items-center gap-3 border-b pb-3 last:border-0 last:pb-0">
+                    <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md border bg-background">
+                      <ProductImage src={item.image_url} alt={item.product_name} className="size-full object-cover" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{item.product_name}</div>
-                      <div className="text-xs text-muted-foreground">{item.product_code} x {item.quantity}</div>
+                      <p className="truncate text-[12px] font-semibold">{item.product_name}</p>
+                      <p className="font-mono text-[10px] text-muted-foreground">{item.product_code} x {item.quantity}</p>
                     </div>
-                    <div className="text-right text-sm font-semibold">{formatVND(item.subtotal)}</div>
+                    <span className="shrink-0 text-right font-mono text-[12px] font-bold">{formatVND(item.subtotal)}</span>
                   </div>
                 ))}
               </div>
 
-              <div className="shrink-0 space-y-1 border-t p-3">
+              <div className="shrink-0 space-y-2 border-t p-4">
                 {orderDiscount(selectedOrder) > 0 && (
                   <>
-                    <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>Tạm tính</span><span>{formatVND(orderSubtotal(selectedOrder, selectedItems))}</span>
+                    <div className="flex justify-between text-[13px]">
+                      <span className="text-muted-foreground">Tạm tính</span><span className="font-mono">{formatVND(orderSubtotal(selectedOrder, selectedItems))}</span>
                     </div>
-                    <div className="flex justify-between text-sm text-muted-foreground">
-                      <span>Giảm giá</span><span>-{formatVND(orderDiscount(selectedOrder))}</span>
+                    <div className="flex justify-between text-[13px]">
+                      <span className="text-muted-foreground">Giảm giá</span><span className="font-mono">-{formatVND(orderDiscount(selectedOrder))}</span>
                     </div>
                   </>
                 )}
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>Giá vốn</span><span>{formatVND(selectedOrder.cost_total)}</span>
+                <div className="flex justify-between text-[13px]">
+                  <span className="text-muted-foreground">Giá vốn</span><span className="font-mono">{formatVND(selectedOrder.cost_total)}</span>
                 </div>
-                <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>Lợi nhuận</span><span>{formatVND(profit(selectedOrder))}</span>
+                <div className="flex justify-between text-[13px]">
+                  <span className="text-muted-foreground">Lợi nhuận</span><span className="font-mono">{formatVND(profit(selectedOrder))}</span>
                 </div>
-                <div className="flex justify-between text-lg font-semibold">
-                  <span>Tổng tiền</span><span className="text-primary">{formatVND(selectedOrder.total)}</span>
+                <div className="flex items-end justify-between border-t pt-3">
+                  <span className="font-semibold">Tổng tiền</span><span className="font-display text-2xl font-extrabold text-primary">{formatVND(selectedOrder.total)}</span>
                 </div>
               </div>
             </>
           )}
-        </Card>
+        </aside>
       </div>
 
       <Dialog open={!!invoiceOrderId} onOpenChange={(open) => !open && setInvoiceOrderId(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[calc(100vh-2rem)] max-w-lg overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{invoiceOrder ? `Hoá đơn #${invoiceOrder.id}` : "Hoá đơn"}</DialogTitle>
+            <DialogTitle className="font-display">{invoiceOrder ? `Hoá đơn #${invoiceOrder.id}` : "Hoá đơn"}</DialogTitle>
           </DialogHeader>
           {invoiceOrder && (
-            <div className="rounded-md border bg-white p-5 font-mono text-sm text-black">
+            <div className="rounded-md border bg-white p-5 font-mono text-sm text-black shadow-sm">
               <div className="text-center">
                 <div className="text-lg font-bold">{invoiceTemplate?.shop_name || "ShopFlow"}</div>
                 {invoiceTemplate?.shop_address && <div className="text-xs">{invoiceTemplate.shop_address}</div>}

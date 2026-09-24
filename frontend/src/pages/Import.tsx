@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { format } from "date-fns";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
 import {
   ArrowDown,
   ArrowUp,
@@ -60,6 +56,14 @@ type SortKey = "id" | "created_at" | "product_code" | "product_name" | "cost_pri
 type SortDirection = "asc" | "desc";
 
 const PAGE_SIZE = 10;
+
+const LOOKUP_TONE: Record<LookupStatus, string> = {
+  idle: "bg-muted text-muted-foreground",
+  loading: "bg-primary/10 text-primary",
+  found: "bg-success/10 text-success",
+  not_found: "bg-accent/35 text-accent-foreground",
+  error: "bg-destructive/10 text-destructive",
+};
 
 function formatPriceInput(value: number) {
   const normalizedValue = Math.max(0, Number(value) || 0);
@@ -316,16 +320,16 @@ function ImportPageInner() {
   }) => {
     const Icon = sort.key === sortKey ? (sort.direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
     return (
-      <TableHead className={className}>
+      <th className={`p-3 ${className}`}>
         <button
           type="button"
           onClick={() => handleSort(sortKey)}
-          className="flex w-full items-center gap-1 text-left font-medium hover:text-foreground"
+          className={`flex w-full items-center gap-1 text-left uppercase hover:text-foreground ${className.includes("text-right") ? "justify-end" : ""}`}
         >
           <span>{children}</span>
-          <Icon className="h-3.5 w-3.5 shrink-0" />
+          <Icon className={`size-3 shrink-0 ${sort.key === sortKey ? "text-primary" : "opacity-50"}`} />
         </button>
-      </TableHead>
+      </th>
     );
   };
 
@@ -478,88 +482,100 @@ function ImportPageInner() {
   const rangeEnd = Math.min(pageStart + visiblePurchases.length, sortedPurchases.length);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between flex-wrap gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 sm:p-5">
+      <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-semibold">Nhập hàng</h1>
-          <p className="text-muted-foreground text-sm mt-1">Quét hoặc nhập mã, sau đó điền thông tin & lưu</p>
+          <p className="font-mono text-[10px] uppercase text-muted-foreground">Quét hoặc nhập mã, sau đó điền thông tin & lưu</p>
+          <h1 className="font-display text-[26px] font-extrabold">Nhập hàng</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <RefreshButton loading={refreshingPurchases} onClick={() => loadPurchases(true)} />
           <Button variant="outline" onClick={backfillMissingImages} disabled={backfillingImages}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${backfillingImages ? "animate-spin" : ""}`} />
+            <RefreshCw className={backfillingImages ? "animate-spin" : ""} />
             {backfillingImages ? "Đang tải ảnh..." : "Tải ảnh thiếu"}
           </Button>
           <Button variant="outline" onClick={exportPurchases} disabled={purchases.length === 0}>
-            <FileSpreadsheet className="w-4 h-4 mr-2" /> Xuất Excel
+            <FileSpreadsheet />
+            Xuất Excel
           </Button>
         </div>
       </div>
 
-      <Card className="shrink-0 p-3 shadow-elegant">
-        <form onSubmit={handleScan} className="flex gap-2">
-          <div className="relative flex-1">
-            <ScanLine className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" />
-            <Input
-              ref={scanRef}
-              autoFocus
-              placeholder="Nhập mã vạch rồi Enter để tìm sản phẩm..."
-              className="pl-9 h-11"
-              value={scan}
-              onChange={(e) => setScan(e.target.value)}
-            />
-          </div>
-          <Button type="submit" size="lg">Tìm & thêm</Button>
-          <Button type="button" size="lg" variant="outline" onClick={handleManualAdd}>
-            <Plus className="mr-2 h-4 w-4" /> Thêm tay
-          </Button>
-        </form>
-      </Card>
+      <form
+        onSubmit={handleScan}
+        className="flex shrink-0 animate-rise flex-wrap gap-2"
+        style={{ animationDelay: "60ms" }}
+      >
+        <label className="flex h-11 min-w-60 flex-1 items-center gap-2 rounded-md border bg-card px-3 ring-offset-background backdrop-blur-md focus-within:ring-2 focus-within:ring-ring">
+          <ScanLine className="size-5 shrink-0 text-primary" />
+          <Input
+            ref={scanRef}
+            autoFocus
+            placeholder="Nhập mã vạch rồi Enter để tìm sản phẩm..."
+            className="h-full border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+            value={scan}
+            onChange={(e) => setScan(e.target.value)}
+          />
+          <span className="hidden shrink-0 font-mono text-[9px] text-muted-foreground sm:block">ENTER để thêm</span>
+        </label>
+        <Button type="submit" size="lg" className="h-11">Tìm & thêm</Button>
+        <Button type="button" size="lg" variant="outline" className="h-11" onClick={handleManualAdd}>
+          <Plus />
+          Thêm tay
+        </Button>
+      </form>
 
-      <div className="flex flex-1 min-h-0 flex-col gap-3">
-        <Card className="flex min-h-0 flex-1 flex-col overflow-hidden shadow-elegant">
-          <div className="shrink-0 border-b px-4 py-2">
-            <div className="font-semibold">Phiếu nhập đang soạn</div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <section
+          className="flex min-h-0 flex-1 animate-rise flex-col overflow-hidden rounded-lg border bg-card backdrop-blur-md"
+          style={{ animationDelay: "120ms" }}
+        >
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b p-3">
+            <h2 className="font-display text-[15px] font-bold">Phiếu nhập đang soạn</h2>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="min-w-[980px]">
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <TableHead className="w-16">Ảnh</TableHead>
-                  <TableHead className="w-44">Mã</TableHead>
-                  <TableHead className="min-w-[220px]">Tên SP</TableHead>
-                  <TableHead className="w-32">Giá nhập</TableHead>
-                  <TableHead className="w-32">Giá bán</TableHead>
-                  <TableHead className="w-24">SL</TableHead>
-                  <TableHead className="w-32 text-right">Thành tiền</TableHead>
-                  <TableHead className="w-44">Trạng thái</TableHead>
-                  <TableHead className="w-12"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <table className="w-full min-w-[980px] text-left text-[12px]">
+              <thead className="sticky top-0 z-10 bg-muted font-mono text-[9px] uppercase text-muted-foreground">
+                <tr>
+                  <th className="w-16 p-3">Ảnh</th>
+                  <th className="w-44 p-3">Mã</th>
+                  <th className="min-w-[220px] p-3">Tên SP</th>
+                  <th className="w-32 p-3">Giá nhập</th>
+                  <th className="w-32 p-3">Giá bán</th>
+                  <th className="w-24 p-3">SL</th>
+                  <th className="w-32 p-3 text-right">Thành tiền</th>
+                  <th className="w-44 p-3">Trạng thái</th>
+                  <th className="w-12 p-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
                 {rows.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
-                      <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                      Chưa có hàng nhập. Nhập mã vạch hoặc bấm Thêm tay ở phía trên.
-                    </TableCell>
-                  </TableRow>
+                  <tr>
+                    <td colSpan={9} className="p-3">
+                      <div className="grid h-40 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
+                        <div>
+                          <Package className="mx-auto mb-2 size-7" />
+                          <p className="text-sm">Chưa có hàng nhập. Nhập mã vạch hoặc bấm Thêm tay ở phía trên.</p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
                 )}
                 {rows.map((row) => (
-                  <TableRow key={row.key}>
-                    <TableCell className="p-2">
-                      <div className="w-10 h-10 rounded bg-muted overflow-hidden flex items-center justify-center">
+                  <tr key={row.key} className="hover:bg-muted/40">
+                    <td className="px-3 py-2">
+                      <div className="grid size-10 place-items-center overflow-hidden rounded-md border bg-muted">
                         {row.lookup_status === "loading" ? (
-                          <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                          <Loader2 className="size-4 animate-spin text-primary" />
                         ) : row.image_url ? (
-                          <ProductImage src={row.image_url} alt={row.name} className="w-full h-full object-cover" />
+                          <ProductImage src={row.image_url} alt={row.name} className="size-full object-cover" />
                         ) : (
-                          <Package className="w-4 h-4 text-muted-foreground/40" />
+                          <Package className="size-4 text-muted-foreground/40" />
                         )}
                       </div>
-                    </TableCell>
-                    <TableCell className="p-2"><Input value={row.code} onChange={(e) => update(row.key, "code", e.target.value)} className="h-9" /></TableCell>
-                    <TableCell className="p-2">
+                    </td>
+                    <td className="px-3 py-2"><Input value={row.code} onChange={(e) => update(row.key, "code", e.target.value)} className="h-9 bg-background font-mono" /></td>
+                    <td className="px-3 py-2">
                       <Input
                         ref={(element) => {
                           if (element) nameInputRefs.current.set(row.key, element);
@@ -567,83 +583,94 @@ function ImportPageInner() {
                         }}
                         value={row.name}
                         onChange={(e) => update(row.key, "name", e.target.value)}
-                        className="h-9"
+                        className="h-9 bg-background font-semibold"
                         placeholder="Tên sản phẩm"
                       />
-                    </TableCell>
-                    <TableCell className="p-2">
+                    </td>
+                    <td className="px-3 py-2">
                       <Input
                         type="text"
                         inputMode="numeric"
                         value={formatPriceInput(row.cost_price)}
                         onChange={(e) => update(row.key, "cost_price", parsePriceInput(e.target.value))}
-                        className="h-9"
+                        className="h-9 bg-background font-mono"
                       />
-                    </TableCell>
-                    <TableCell className="p-2">
+                    </td>
+                    <td className="px-3 py-2">
                       <Input
                         type="text"
                         inputMode="numeric"
                         value={formatPriceInput(row.sale_price)}
                         onChange={(e) => update(row.key, "sale_price", parsePriceInput(e.target.value))}
-                        className="h-9"
+                        className="h-9 bg-background font-mono"
                       />
-                    </TableCell>
-                    <TableCell className="p-2"><Input type="number" value={row.quantity} onChange={(e) => update(row.key, "quantity", Number(e.target.value))} className="h-9" /></TableCell>
-                    <TableCell className="p-2 text-right font-medium">{formatVND(row.cost_price * row.quantity)}</TableCell>
-                    <TableCell className="p-2">
-                      <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        <div className="flex items-center gap-1.5">
-                          {row.lookup_status === "loading" && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
-                          <span className={row.lookup_status === "error" ? "text-destructive" : ""}>
-                            {row.lookup_message}
-                          </span>
-                        </div>
+                    </td>
+                    <td className="px-3 py-2"><Input type="number" value={row.quantity} onChange={(e) => update(row.key, "quantity", Number(e.target.value))} className="h-9 bg-background font-mono" /></td>
+                    <td className="px-3 py-2 text-right font-mono font-semibold">{formatVND(row.cost_price * row.quantity)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col items-start gap-1">
+                        <span className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-[10px] font-semibold leading-tight ${LOOKUP_TONE[row.lookup_status]}`}>
+                          {row.lookup_status === "loading" && <Loader2 className="size-3 shrink-0 animate-spin" />}
+                          <span>{row.lookup_message}</span>
+                        </span>
                         {row.lookup_status !== "loading" && row.lookup_status !== "idle" && (
                           <Button
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="h-7 justify-start px-1.5 text-xs"
+                            className="h-7 justify-start gap-1 px-1.5 text-[11px] text-muted-foreground [&_svg]:size-3"
                             onClick={() => lookupOnlineForRow(row, undefined, { mode: "deep", refresh: true })}
                           >
-                            <RefreshCw className="mr-1 h-3 w-3" /> Thử lại
+                            <RefreshCw />
+                            Thử lại
                           </Button>
                         )}
                       </div>
-                    </TableCell>
-                    <TableCell className="p-2">
-                      <Button size="icon" variant="ghost" onClick={() => remove(row.key)} className="text-destructive">
-                        <Trash2 className="w-4 h-4" />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => remove(row.key)}
+                        className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <Trash2 />
                       </Button>
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
+              </tbody>
+            </table>
           </div>
           {rows.length > 0 && (
-            <div className="shrink-0 border-t p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="text-lg">Tổng nhập: <span className="font-semibold text-primary">{formatVND(totalCost)}</span></div>
+            <div className="flex shrink-0 flex-col justify-between gap-3 border-t p-3 sm:flex-row sm:items-center">
+              <div className="flex items-baseline gap-3">
+                <span className="text-sm font-semibold">Tổng nhập</span>
+                <span className="font-display text-2xl font-extrabold text-primary">{formatVND(totalCost)}</span>
+              </div>
               <Button onClick={save} disabled={saving} size="lg">
-                <Save className="w-4 h-4 mr-2" /> {saving ? "Đang lưu..." : "Lưu nhập kho"}
+                <Save />
+                {saving ? "Đang lưu..." : "Lưu nhập kho"}
               </Button>
             </div>
           )}
-        </Card>
+        </section>
 
-        <Card className="flex min-h-0 flex-1 flex-col overflow-hidden shadow-elegant">
-          <div className="shrink-0 border-b px-4 py-2 flex items-center justify-between gap-3">
+        <section
+          className="flex min-h-0 flex-1 animate-rise flex-col overflow-hidden rounded-lg border bg-card backdrop-blur-md"
+          style={{ animationDelay: "180ms" }}
+        >
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b p-3">
             <div>
-              <div className="font-semibold">Lịch sử nhập hàng</div>
-              <div className="text-xs text-muted-foreground">Danh sách phiếu nhập đã lưu</div>
+              <h2 className="font-display text-[15px] font-bold">Lịch sử nhập hàng</h2>
+              <p className="font-mono text-[10px] text-muted-foreground">Danh sách phiếu nhập đã lưu</p>
             </div>
-            <div className="text-sm text-muted-foreground">{purchases.length} dòng</div>
+            <span className="rounded bg-primary/10 px-2 py-1 font-mono text-[10px] text-primary">{purchases.length} dòng</span>
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="min-w-[1120px]">
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
+            <table className="w-full min-w-[1120px] text-left text-[12px]">
+              <thead className="sticky top-0 z-10 bg-muted font-mono text-[9px] uppercase text-muted-foreground">
+                <tr>
                   <SortableHead sortKey="id" className="w-20">ID</SortableHead>
                   <SortableHead sortKey="created_at" className="w-40">Thời gian</SortableHead>
                   <SortableHead sortKey="product_code" className="w-44">Mã</SortableHead>
@@ -652,112 +679,118 @@ function ImportPageInner() {
                   <SortableHead sortKey="sale_price" className="w-32 text-right">Giá bán</SortableHead>
                   <SortableHead sortKey="quantity" className="w-24 text-right">SL</SortableHead>
                   <SortableHead sortKey="total" className="w-36 text-right">Thành tiền</SortableHead>
-                  <TableHead className="w-28 text-right">Sửa</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+                  <th className="w-28 p-3 text-right">Sửa</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
                 {visiblePurchases.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
-                      <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                      Chưa có lịch sử nhập hàng.
-                    </TableCell>
-                  </TableRow>
+                  <tr>
+                    <td colSpan={9} className="p-3">
+                      <div className="grid h-40 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
+                        <div>
+                          <Package className="mx-auto mb-2 size-7" />
+                          <p className="text-sm">Chưa có lịch sử nhập hàng.</p>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
                 )}
                 {visiblePurchases.map((purchase) => (
-                  <TableRow key={purchase.id}>
-                    <TableCell className="font-medium">#{purchase.id}</TableCell>
-                    <TableCell>{formatDateTime(purchase.created_at)}</TableCell>
-                    <TableCell>{purchase.product_code}</TableCell>
-                    <TableCell className="font-medium">{purchase.product_name}</TableCell>
+                  <tr key={purchase.id} className="hover:bg-muted/40">
+                    <td className="p-3 font-mono font-semibold">#{purchase.id}</td>
+                    <td className="p-3 font-mono text-muted-foreground">{formatDateTime(purchase.created_at)}</td>
+                    <td className="p-3 font-mono">{purchase.product_code}</td>
+                    <td className="p-3 font-semibold">{purchase.product_name}</td>
                     {editingPurchase?.id === purchase.id ? (
                       <>
-                        <TableCell className="p-2">
+                        <td className="px-3 py-2">
                           <Input
                             type="text"
                             inputMode="numeric"
                             value={formatPriceInput(editingPurchase.cost_price)}
                             onChange={(e) => updateEditingPurchase("cost_price", parsePriceInput(e.target.value))}
-                            className="h-9 text-right"
+                            className="h-8 bg-background text-right font-mono"
                           />
-                        </TableCell>
-                        <TableCell className="p-2">
+                        </td>
+                        <td className="px-3 py-2">
                           <Input
                             type="text"
                             inputMode="numeric"
                             value={formatPriceInput(editingPurchase.sale_price)}
                             onChange={(e) => updateEditingPurchase("sale_price", parsePriceInput(e.target.value))}
-                            className="h-9 text-right"
+                            className="h-8 bg-background text-right font-mono"
                           />
-                        </TableCell>
-                        <TableCell className="p-2">
+                        </td>
+                        <td className="px-3 py-2">
                           <Input
                             type="number"
                             min={1}
                             value={editingPurchase.quantity}
                             onChange={(e) => updateEditingPurchase("quantity", Number(e.target.value))}
-                            className="h-9 text-right"
+                            className="h-8 bg-background text-right font-mono"
                           />
-                        </TableCell>
-                        <TableCell className="text-right font-semibold">
+                        </td>
+                        <td className="p-3 text-right font-mono font-semibold text-primary">
                           {formatVND(editingPurchase.cost_price * editingPurchase.quantity)}
-                        </TableCell>
-                        <TableCell className="text-right">
+                        </td>
+                        <td className="px-3 py-2 text-right">
                           <div className="flex justify-end gap-1">
-                            <Button size="icon" variant="ghost" onClick={saveEditingPurchase}>
-                              <Check className="h-4 w-4 text-primary" />
+                            <Button size="icon" variant="ghost" className="size-8" onClick={saveEditingPurchase}>
+                              <Check className="text-primary" />
                             </Button>
-                            <Button size="icon" variant="ghost" onClick={() => setEditingPurchase(null)}>
-                              <X className="h-4 w-4" />
+                            <Button size="icon" variant="ghost" className="size-8" onClick={() => setEditingPurchase(null)}>
+                              <X />
                             </Button>
                           </div>
-                        </TableCell>
+                        </td>
                       </>
                     ) : (
                       <>
-                        <TableCell className="text-right">{formatVND(purchase.cost_price)}</TableCell>
-                        <TableCell className="text-right">{formatVND(purchase.sale_price)}</TableCell>
-                        <TableCell className="text-right">{purchase.quantity}</TableCell>
-                        <TableCell className="text-right font-semibold">{formatVND(purchase.total)}</TableCell>
-                        <TableCell className="text-right">
-                          <Button size="icon" variant="ghost" onClick={() => startEditPurchase(purchase)}>
-                            <Pencil className="h-4 w-4" />
+                        <td className="p-3 text-right font-mono">{formatVND(purchase.cost_price)}</td>
+                        <td className="p-3 text-right font-mono">{formatVND(purchase.sale_price)}</td>
+                        <td className="p-3 text-right font-mono">{purchase.quantity}</td>
+                        <td className="p-3 text-right font-mono font-semibold">{formatVND(purchase.total)}</td>
+                        <td className="px-3 py-2 text-right">
+                          <Button size="icon" variant="ghost" className="size-8" onClick={() => startEditPurchase(purchase)}>
+                            <Pencil />
                           </Button>
-                        </TableCell>
+                        </td>
                       </>
                     )}
-                  </TableRow>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
+              </tbody>
+            </table>
           </div>
-          <div className="shrink-0 border-t px-4 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="text-sm text-muted-foreground">
+          <div className="flex shrink-0 flex-col justify-between gap-3 border-t px-3 py-2 sm:flex-row sm:items-center">
+            <p className="font-mono text-[10px] text-muted-foreground">
               Hiển thị {rangeStart}-{rangeEnd} / {sortedPurchases.length}
-            </div>
+            </p>
             <div className="flex items-center gap-2">
               <Button
                 size="icon"
                 variant="outline"
+                className="size-8"
                 onClick={() => setPage((value) => Math.max(1, value - 1))}
                 disabled={currentPage <= 1}
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft />
               </Button>
-              <div className="min-w-24 text-center text-sm">
+              <div className="min-w-24 text-center font-mono text-[11px]">
                 Trang {currentPage} / {totalPages}
               </div>
               <Button
                 size="icon"
                 variant="outline"
+                className="size-8"
                 onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
                 disabled={currentPage >= totalPages}
               >
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight />
               </Button>
             </div>
           </div>
-        </Card>
+        </section>
       </div>
     </div>
   );

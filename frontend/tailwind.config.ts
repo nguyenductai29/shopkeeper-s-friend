@@ -1,5 +1,9 @@
 import type { Config } from "tailwindcss";
 
+// Tokens are stored as raw oklch components (`L C H`) so opacity modifiers keep working.
+// An optional `--<name>-alpha` variable carries the token's built-in translucency (e.g. glass cards).
+const token = (name: string) => `oklch(var(--${name}) / calc(var(--${name}-alpha, 1) * <alpha-value>))`;
+
 export default {
   darkMode: ["class"],
   content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
@@ -13,63 +17,75 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        sans: ["Manrope", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
+        display: ["Sora", "Manrope", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "Consolas", "monospace"],
+      },
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        border: token("border"),
+        input: token("input"),
+        ring: token("ring"),
+        background: token("background"),
+        foreground: token("foreground"),
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: token("primary"),
+          foreground: token("primary-foreground"),
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: token("secondary"),
+          foreground: token("secondary-foreground"),
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: token("destructive"),
+          foreground: token("destructive-foreground"),
         },
         success: {
-          DEFAULT: "hsl(var(--success))",
-          foreground: "hsl(var(--success-foreground))",
+          DEFAULT: token("success"),
+          foreground: token("success-foreground"),
         },
         warning: {
-          DEFAULT: "hsl(var(--warning))",
-          foreground: "hsl(var(--warning-foreground))",
+          DEFAULT: token("warning"),
+          foreground: token("warning-foreground"),
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: token("muted"),
+          foreground: token("muted-foreground"),
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: token("accent"),
+          foreground: token("accent-foreground"),
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: token("popover"),
+          foreground: token("popover-foreground"),
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: token("card"),
+          foreground: token("card-foreground"),
         },
+        coral: token("coral"),
+        gold: token("gold"),
         sidebar: {
-          DEFAULT: "hsl(var(--sidebar-background))",
-          foreground: "hsl(var(--sidebar-foreground))",
-          primary: "hsl(var(--sidebar-primary))",
-          "primary-foreground": "hsl(var(--sidebar-primary-foreground))",
-          accent: "hsl(var(--sidebar-accent))",
-          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
-          border: "hsl(var(--sidebar-border))",
-          ring: "hsl(var(--sidebar-ring))",
+          DEFAULT: token("sidebar-background"),
+          foreground: token("sidebar-foreground"),
+          primary: token("sidebar-primary"),
+          "primary-foreground": token("sidebar-primary-foreground"),
+          accent: token("sidebar-accent"),
+          "accent-foreground": token("sidebar-accent-foreground"),
+          border: token("sidebar-border"),
+          ring: token("sidebar-ring"),
         },
       },
+      opacity: {
+        3: "0.03",
+        8: "0.08",
+        12: "0.12",
+      },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        lg: "calc(var(--radius) + 2px)",
+        md: "var(--radius)",
+        sm: "calc(var(--radius) - 2px)",
       },
       keyframes: {
         "accordion-down": {
@@ -88,10 +104,20 @@ export default {
             height: "0",
           },
         },
+        rise: {
+          from: { opacity: "0", transform: "translateY(10px)" },
+          to: { opacity: "1", transform: "none" },
+        },
+        grow: {
+          from: { transform: "scaleY(0)" },
+          to: { transform: "scaleY(1)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        rise: "rise 0.42s cubic-bezier(0.32, 0.72, 0, 1) both",
+        grow: "grow 0.65s cubic-bezier(0.32, 0.72, 0, 1) both",
       },
     },
   },

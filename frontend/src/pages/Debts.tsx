@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { formatVND } from "@/lib/format";
 import { format } from "date-fns";
-import { Phone, MapPin, Check, ChevronDown, ChevronUp, Users, FileSpreadsheet } from "lucide-react";
+import { Phone, MapPin, Check, ChevronDown, ChevronUp, Users, FileSpreadsheet, ReceiptText, HandCoins } from "lucide-react";
 import { toast } from "sonner";
 import { AdminGate } from "@/components/AdminGate";
 import { RefreshButton } from "@/components/RefreshButton";
@@ -66,71 +64,93 @@ function Inner() {
   const totalDebt = orders.reduce((s, o) => s + Number(o.total), 0);
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between flex-wrap gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-4 p-4 sm:p-5">
+      <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-semibold">Công nợ khách hàng</h1>
-          <p className="text-muted-foreground text-sm mt-1">Đơn hàng chưa thanh toán</p>
+          <p className="font-mono text-[10px] uppercase text-muted-foreground">Đơn hàng chưa thanh toán</p>
+          <h1 className="font-display text-[26px] font-extrabold">Công nợ khách hàng</h1>
         </div>
         <div className="flex gap-2">
           <RefreshButton loading={refreshing} onClick={() => load(true)} />
           <Button variant="outline" onClick={exportDebts} disabled={orders.length === 0}>
-            <FileSpreadsheet className="w-4 h-4 mr-2" /> Xuất Excel
+            <FileSpreadsheet /> Xuất Excel
           </Button>
         </div>
       </div>
 
-      <div className="grid shrink-0 sm:grid-cols-3 gap-3">
-        <Card className="p-3"><div className="text-xs text-muted-foreground">Số đơn nợ</div><div className="text-2xl font-semibold mt-1">{orders.length}</div></Card>
-        <Card className="p-3"><div className="text-xs text-muted-foreground">Tổng công nợ</div><div className="text-2xl font-semibold mt-1 text-destructive">{formatVND(totalDebt)}</div></Card>
-        <Card className="p-3"><div className="text-xs text-muted-foreground">Khách độc lập</div><div className="text-2xl font-semibold mt-1">{new Set(orders.map(o => o.customer_phone || o.customer_name)).size}</div></Card>
+      <div className="grid shrink-0 gap-3 sm:grid-cols-3">
+        <div className="animate-rise rounded-lg border bg-card p-4 backdrop-blur-md">
+          <div className="flex items-start justify-between">
+            <p className="font-mono text-[10px] uppercase text-muted-foreground">Số đơn nợ</p>
+            <ReceiptText className="size-4 text-primary" />
+          </div>
+          <p className="mt-2 font-display text-2xl font-extrabold">{orders.length}</p>
+        </div>
+        <div className="animate-rise rounded-lg border bg-card p-4 backdrop-blur-md" style={{ animationDelay: "60ms" }}>
+          <div className="flex items-start justify-between">
+            <p className="font-mono text-[10px] uppercase text-muted-foreground">Tổng công nợ</p>
+            <HandCoins className="size-4 text-primary" />
+          </div>
+          <p className="mt-2 font-display text-2xl font-extrabold text-destructive">{formatVND(totalDebt)}</p>
+        </div>
+        <div className="animate-rise rounded-lg border bg-card p-4 backdrop-blur-md" style={{ animationDelay: "120ms" }}>
+          <div className="flex items-start justify-between">
+            <p className="font-mono text-[10px] uppercase text-muted-foreground">Khách độc lập</p>
+            <Users className="size-4 text-primary" />
+          </div>
+          <p className="mt-2 font-display text-2xl font-extrabold">{new Set(orders.map(o => o.customer_phone || o.customer_name)).size}</p>
+        </div>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
+      <div className="min-h-0 flex-1 overflow-auto">
         {orders.length === 0 && (
-          <Card className="p-12 text-center text-muted-foreground">
-            <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />
-            Không có công nợ — tất cả khách đã thanh toán!
-          </Card>
+          <div className="grid h-56 place-items-center rounded-lg border border-dashed text-center text-muted-foreground">
+            <div>
+              <Users className="mx-auto mb-2 size-7" />
+              <p className="text-sm">Không có công nợ — tất cả khách đã thanh toán!</p>
+            </div>
+          </div>
         )}
+        <div className="divide-y overflow-hidden rounded-lg border bg-card backdrop-blur-md empty:hidden">
         {orders.map((o) => (
-          <Card key={o.id} className="overflow-hidden shadow-elegant">
-            <div className="p-4 flex items-center gap-3 flex-wrap">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold">{o.customer_name || "Khách lẻ"}</span>
-                  <Badge variant="destructive">Chưa TT</Badge>
-                  <span className="text-xs text-muted-foreground">{format(new Date(o.created_at), "dd/MM/yyyy HH:mm")}</span>
+          <div key={o.id}>
+            <div className="flex flex-wrap items-center gap-3 p-3 hover:bg-muted/40">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[13px] font-semibold">{o.customer_name || "Khách lẻ"}</span>
+                  <span className="rounded bg-destructive/10 px-2 py-1 text-[10px] font-semibold text-destructive">Chưa TT</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">{format(new Date(o.created_at), "dd/MM/yyyy HH:mm")}</span>
                 </div>
-                <div className="flex gap-3 text-xs text-muted-foreground mt-1 flex-wrap">
-                  {o.customer_phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{o.customer_phone}</span>}
-                  {o.customer_address && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{o.customer_address}</span>}
+                <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                  {o.customer_phone && <span className="flex items-center gap-1 font-mono"><Phone className="size-3" />{o.customer_phone}</span>}
+                  {o.customer_address && <span className="flex items-center gap-1"><MapPin className="size-3" />{o.customer_address}</span>}
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-lg font-semibold text-primary">{formatVND(o.total)}</div>
+                <div className="font-mono text-sm font-semibold text-primary">{formatVND(o.total)}</div>
               </div>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => toggle(o.id)}>
-                  {open === o.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />} Chi tiết
+                  {open === o.id ? <ChevronUp /> : <ChevronDown />} Chi tiết
                 </Button>
                 <Button size="sm" onClick={() => markPaid(o.id)}>
-                  <Check className="w-4 h-4 mr-1" /> Đã TT
+                  <Check /> Đã TT
                 </Button>
               </div>
             </div>
             {open === o.id && (
-              <div className="border-t bg-muted/30 px-4 py-3 space-y-1">
+              <div className="space-y-1.5 border-t bg-muted/40 px-4 py-3">
                 {(items[String(o.id)] || []).map((it, i) => (
-                  <div key={i} className="flex justify-between text-sm">
-                    <span>{it.product_name} <span className="text-muted-foreground">× {it.quantity}</span></span>
-                    <span className="font-medium">{formatVND(it.subtotal)}</span>
+                  <div key={i} className="flex justify-between gap-3 text-[12px]">
+                    <span>{it.product_name} <span className="font-mono text-muted-foreground">× {it.quantity}</span></span>
+                    <span className="font-mono font-semibold">{formatVND(it.subtotal)}</span>
                   </div>
                 ))}
               </div>
             )}
-          </Card>
+          </div>
         ))}
+        </div>
       </div>
     </div>
   );

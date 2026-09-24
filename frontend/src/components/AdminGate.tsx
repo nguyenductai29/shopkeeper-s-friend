@@ -13,14 +13,14 @@ export function AdminGate({ children }: { children: React.ReactNode }) {
   if (isAdmin) return <>{children}</>;
 
   return (
-    <div className="flex h-full items-center justify-center px-4">
-      <Card className="w-full max-w-md p-8 shadow-elegant">
-        <div className="flex flex-col items-center text-center mb-6">
-          <div className="w-14 h-14 rounded-full gradient-primary flex items-center justify-center mb-4 shadow-glow">
-            <Lock className="w-6 h-6 text-primary-foreground" />
+    <div className="flex h-full min-h-0 overflow-y-auto p-4 sm:p-5">
+      <Card className="animate-rise m-auto w-full max-w-md p-8 backdrop-blur-md">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <div className="mb-4 grid size-12 place-items-center rounded-lg bg-primary/10 text-primary">
+            <Lock className="size-5" />
           </div>
-          <h2 className="text-2xl font-semibold">Khu vực quản trị</h2>
-          <p className="text-muted-foreground text-sm mt-1">Nhập mật khẩu để tiếp tục</p>
+          <h2 className="font-display text-[22px] font-extrabold">Khu vực quản trị</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Nhập mật khẩu để tiếp tục</p>
         </div>
         <form
           onSubmit={(e) => {
@@ -38,7 +38,8 @@ export function AdminGate({ children }: { children: React.ReactNode }) {
             autoFocus
           />
           <Button type="submit" className="w-full">
-            <ShieldCheck className="w-4 h-4 mr-2" /> Mở khoá
+            <ShieldCheck />
+            Mở khoá
           </Button>
         </form>
       </Card>

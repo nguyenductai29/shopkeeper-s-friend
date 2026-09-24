@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -122,28 +121,33 @@ function Inner() {
     }
   };
 
-  if (!s) return <div className="text-muted-foreground">Đang tải...</div>;
+  if (!s) return <div className="p-4 text-sm text-muted-foreground sm:p-5">Đang tải...</div>;
 
   return (
-    <div className="flex h-full min-h-0 max-w-5xl flex-col gap-3 overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 max-w-5xl flex-col gap-4 overflow-hidden p-4 sm:p-5">
+      <div className="flex shrink-0 animate-rise flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-semibold">Cài đặt</h1>
-          <p className="text-muted-foreground text-sm mt-1">Cài đặt thông báo và ứng dụng</p>
+          <p className="font-mono text-[10px] uppercase text-muted-foreground">Cài đặt thông báo và ứng dụng</p>
+          <h1 className="font-display text-[26px] font-extrabold">Cài đặt</h1>
         </div>
         <RefreshButton loading={refreshing} onClick={() => loadSettings(true)} />
       </div>
 
-      <Card className="shrink-0 p-4 shadow-elegant space-y-3">
-        <div className="flex items-center gap-2">
-          <Store className="w-5 h-5 text-primary" />
-          <h3 className="font-semibold">Thông tin cửa hàng</h3>
+      <section
+        className="shrink-0 animate-rise rounded-lg border bg-card p-4 backdrop-blur-md"
+        style={{ animationDelay: "60ms" }}
+      >
+        <div className="mb-4 flex items-start gap-3">
+          <div className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+            <Store className="size-4" />
+          </div>
+          <h2 className="self-center font-display text-[15px] font-bold">Thông tin cửa hàng</h2>
         </div>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div><Label>Tên cửa hàng</Label><Input value={s.shop_name || ""} onChange={(e) => setS({ ...s, shop_name: e.target.value })} /></div>
-          <div><Label>Đơn vị tiền</Label><Input value={s.currency} onChange={(e) => setS({ ...s, currency: e.target.value })} /></div>
-          <div>
-            <Label>Tỷ giá yên Nhật</Label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5"><Label className="text-[13px] font-semibold">Tên cửa hàng</Label><Input className="bg-background" value={s.shop_name || ""} onChange={(e) => setS({ ...s, shop_name: e.target.value })} /></div>
+          <div className="space-y-1.5"><Label className="text-[13px] font-semibold">Đơn vị tiền</Label><Input className="bg-background font-mono" value={s.currency} onChange={(e) => setS({ ...s, currency: e.target.value })} /></div>
+          <div className="space-y-1.5">
+            <Label className="text-[13px] font-semibold">Tỷ giá yên Nhật</Label>
             <Input
               type="number"
               min={0}
@@ -151,29 +155,37 @@ function Inner() {
               value={s.jpy_to_vnd_rate}
               onChange={(e) => setS({ ...s, jpy_to_vnd_rate: Number(e.target.value) })}
               placeholder="VD: 170"
+              className="bg-background font-mono"
             />
-            <div className="mt-1 text-xs text-muted-foreground">1 JPY = {s.jpy_to_vnd_rate || 0} VND</div>
+            <p className="font-mono text-[11px] text-muted-foreground">1 JPY = {s.jpy_to_vnd_rate || 0} VND</p>
           </div>
         </div>
-      </Card>
+      </section>
 
-      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 shadow-elegant">
-        <div className="mb-3 flex shrink-0 items-center gap-2">
-          <Hash className="h-5 w-5 text-primary" />
+      <section
+        className="flex min-h-0 flex-1 animate-rise flex-col overflow-hidden rounded-lg border bg-card p-4 backdrop-blur-md"
+        style={{ animationDelay: "120ms" }}
+      >
+        <div className="mb-4 flex shrink-0 items-start gap-3">
+          <div className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+            <Hash className="size-4" />
+          </div>
           <div>
-            <h3 className="font-semibold">Discord webhook theo nghiệp vụ</h3>
-            <p className="text-xs text-muted-foreground">Mỗi dòng có thể trỏ tới một channel Discord khác nhau</p>
+            <h2 className="font-display text-[15px] font-bold">Discord webhook theo nghiệp vụ</h2>
+            <p className="font-mono text-[10px] text-muted-foreground">Mỗi dòng có thể trỏ tới một channel Discord khác nhau</p>
           </div>
         </div>
-        <div className="grid min-h-0 flex-1 gap-3 overflow-auto pr-1 md:grid-cols-2">
+        <div className="grid min-h-0 flex-1 content-start gap-3 overflow-auto pr-1 md:grid-cols-2">
           {DISCORD_CHANNELS.map(({ label, description, toggleKey, webhookKey, Icon }) => (
-            <div key={webhookKey} className="rounded-md border bg-muted/20 p-3">
+            <div key={webhookKey} className="rounded-lg border bg-background/70 p-3">
               <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="flex min-w-0 items-start gap-2">
-                  <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="grid size-8 shrink-0 place-items-center rounded-md bg-muted text-primary">
+                    <Icon className="size-4" />
+                  </div>
                   <div className="min-w-0">
-                    <Label htmlFor={toggleKey} className="cursor-pointer font-medium">{label}</Label>
-                    <div className="text-xs text-muted-foreground">{description}</div>
+                    <Label htmlFor={toggleKey} className="cursor-pointer text-[13px] font-semibold">{label}</Label>
+                    <p className="text-[11px] text-muted-foreground">{description}</p>
                   </div>
                 </div>
                 <Switch
@@ -186,17 +198,22 @@ function Inner() {
                 placeholder="https://discord.com/api/webhooks/..."
                 value={s[webhookKey] || ""}
                 onChange={(event) => setS({ ...s, [webhookKey]: event.target.value })}
+                className="bg-background font-mono text-xs md:text-xs"
               />
             </div>
           ))}
         </div>
-      </Card>
+      </section>
 
-      <div className="flex shrink-0 justify-end gap-2">
+      <div className="flex shrink-0 flex-wrap justify-end gap-2">
         <Button size="lg" variant="outline" onClick={testNotifications} disabled={testing}>
-          <Send className="w-4 h-4 mr-2" /> {testing ? "Đang gửi..." : "Gửi thử"}
+          <Send />
+          {testing ? "Đang gửi..." : "Gửi thử"}
         </Button>
-        <Button size="lg" onClick={save}><Save className="w-4 h-4 mr-2" /> Lưu cài đặt</Button>
+        <Button size="lg" onClick={save}>
+          <Save />
+          Lưu cài đặt
+        </Button>
       </div>
     </div>
   );
