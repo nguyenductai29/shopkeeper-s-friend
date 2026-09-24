@@ -4,15 +4,14 @@ import { Button } from "@/components/ui/button";
 import { formatVND } from "@/lib/format";
 import { RefreshButton } from "@/components/RefreshButton";
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
+  Bar,
+  BarChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
-  YAxis,
 } from "recharts";
 import {
+  ArrowRight,
   ArrowDownRight,
   ArrowUpRight,
   Building2,
@@ -77,6 +76,9 @@ const metricIcons: Record<keyof Metrics, LucideIcon> = {
   cogs: Package,
 };
 
+const mainCardKeys: (keyof Metrics)[] = ["revenue", "orders", "actualProfit", "cashIn"];
+const detailCardKeys: (keyof Metrics)[] = ["fixedExpenses", "totalExpenses", "receivable", "payable", "breakEvenRevenue", "cogs"];
+
 const chartAxisTick = { fill: "oklch(var(--muted-foreground))" };
 const chartTooltipStyle = {
   background: "oklch(var(--popover))",
@@ -84,9 +86,6 @@ const chartTooltipStyle = {
   borderRadius: "6px",
   fontSize: 12,
 };
-
-const compactMoney = (value: number) =>
-  new Intl.NumberFormat("vi-VN", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 
 function Change({ value, inverse = false }: { value?: number | null; inverse?: boolean }) {
   if (value == null || !Number.isFinite(value)) return <span className="font-mono text-[10px] text-muted-foreground"><Minus className="inline size-3" /> chưa có kỳ trước</span>;
@@ -100,14 +99,23 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<Date>();
+  const [loadedPeriod, setLoadedPeriod] = useState<Period | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const response = await fetch(`/api/dashboard?period=${period}`);
       if (!response.ok) throw new Error(`Dashboard API ${response.status}`);
       setData(await response.json());
+      setLoadedPeriod(period);
       setUpdatedAt(new Date());
+      setError(null);
+    } catch {
+      setError("Không tải được dữ liệu tổng quan. Hãy kiểm tra kết nối rồi thử lại.");
     } finally {
       if (!silent) setLoading(false);
     }
@@ -120,19 +128,18 @@ export default function Dashboard() {
   }, [load]);
 
   const cards = useMemo(() => {
-    if (!data) return [];
-    const m = data.current;
+    const m = data?.current;
     return [
-      ["Doanh thu", formatVND(m.revenue), "revenue", false],
-      ["Thực thu", formatVND(m.cashIn), "cashIn", false],
-      ["Lợi nhuận thực tế", formatVND(m.actualProfit), "actualProfit", false],
-      ["Số đơn đã bán", m.orders.toLocaleString("vi-VN"), "orders", false],
-      ["Chi phí cố định", formatVND(m.fixedExpenses), "fixedExpenses", true],
-      ["Tổng chi phí", formatVND(m.totalExpenses), "totalExpenses", true],
-      ["Nợ phải thu", formatVND(m.receivable), "receivable", true],
-      ["Nợ phải trả", formatVND(m.payable), "payable", true],
-      ["Doanh thu hòa vốn", formatVND(m.breakEvenRevenue), "breakEvenRevenue", true],
-      ["Giá vốn đã bán", formatVND(m.cogs), "cogs", true],
+      ["Doanh thu", m ? formatVND(m.revenue) : null, "revenue", false],
+      ["Số đơn đã bán", m ? m.orders.toLocaleString("vi-VN") : null, "orders", false],
+      ["Lợi nhuận thực tế", m ? formatVND(m.actualProfit) : null, "actualProfit", false],
+      ["Thực thu", m ? formatVND(m.cashIn) : null, "cashIn", false],
+      ["Chi phí cố định", m ? formatVND(m.fixedExpenses) : null, "fixedExpenses", true],
+      ["Tổng chi phí", m ? formatVND(m.totalExpenses) : null, "totalExpenses", true],
+      ["Nợ phải thu", m ? formatVND(m.receivable) : null, "receivable", true],
+      ["Nợ phải trả", m ? formatVND(m.payable) : null, "payable", true],
+      ["Doanh thu hòa vốn", m ? formatVND(m.breakEvenRevenue) : null, "breakEvenRevenue", true],
+      ["Giá vốn đã bán", m ? formatVND(m.cogs) : null, "cogs", true],
     ] as const;
   }, [data]);
 
@@ -143,11 +150,26 @@ export default function Dashboard() {
     expenses: Number(row.expenses || 0),
   }));
 
+  const pendingOrder = data?.recentOrders.find((order) => order.payment_status !== "paid");
+  const renderCard = ([label, value, key, inverse]: (typeof cards)[number], i: number) => {
+    const Icon = metricIcons[key];
+    return (
+      <div key={key} style={{ animationDelay: `${i * 60}ms` }} className="animate-rise min-w-0 rounded-lg border bg-card p-4 backdrop-blur-md">
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-mono text-[10px] uppercase text-muted-foreground">{label}</p>
+          <Icon className={`size-4 shrink-0 ${inverse ? "text-muted-foreground" : "text-primary"}`} />
+        </div>
+        <p title={value ?? undefined} className={`mt-2 truncate font-display font-extrabold ${value === null ? "text-sm text-muted-foreground" : "text-2xl"}`}>{value ?? (loading ? "Đang tải dữ liệu…" : "Chưa có dữ liệu")}</p>
+        <div className="mt-1 truncate">{data ? <Change value={data.changes?.[key]} inverse={inverse} /> : <span className="font-mono text-[10px] text-muted-foreground">Chưa có số liệu so sánh</span>}</div>
+      </div>
+    );
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4 sm:p-5">
-      <header className="animate-rise flex shrink-0 flex-wrap items-end justify-between gap-3">
+    <div className="h-full space-y-5 overflow-y-auto p-4 sm:p-5">
+      <header className="animate-rise flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate font-mono text-[10px] uppercase text-muted-foreground">Doanh thu · dòng tiền · công nợ · lợi nhuận{updatedAt ? ` · ${updatedAt.toLocaleTimeString("vi-VN")}` : ""}</p>
+          <p className="truncate font-mono text-[10px] uppercase text-muted-foreground">Tổng quan · {periods.find(([key]) => key === period)?.[1]}{updatedAt ? ` · cập nhật ${updatedAt.toLocaleTimeString("vi-VN")}` : ""}</p>
           <h1 className="font-display text-[26px] font-extrabold">Tổng quan cửa hàng</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -161,74 +183,65 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <div className="flex shrink-0 gap-0.5 overflow-x-auto rounded-md border bg-card p-1 backdrop-blur-md">
+      <div className="flex gap-0.5 overflow-x-auto rounded-md border bg-card p-1 backdrop-blur-md">
         {periods.map(([key, label]) => <Button key={key} size="sm" variant={period === key ? "default" : "ghost"} onClick={() => setPeriod(key)} className="flex-1">{label}</Button>)}
       </div>
 
-      <section className="grid shrink-0 grid-cols-2 gap-3 lg:grid-cols-5">
-        {cards.map(([label, value, key, inverse], i) => {
-          const Icon = metricIcons[key];
-          return (
-            <div key={key} style={{ animationDelay: `${i * 40}ms` }} className="animate-rise min-w-0 rounded-lg border bg-card p-3 backdrop-blur-md">
-              <div className="flex items-start justify-between gap-2">
-                <p className="truncate font-mono text-[10px] uppercase text-muted-foreground">{label}</p>
-                <Icon className={`size-4 shrink-0 ${inverse ? "text-muted-foreground" : "text-primary"}`} />
-              </div>
-              <p title={value} className="mt-1.5 truncate font-display text-lg font-extrabold xl:text-xl">{value}</p>
-              <div className="mt-1 truncate"><Change value={data?.changes?.[key]} inverse={inverse} /></div>
-            </div>
-          );
-        })}
+      {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12px] text-destructive"><span>{error}{data && " Đang hiển thị dữ liệu đã tải trước đó."}</span><Button size="sm" variant="outline" onClick={() => void load(false)} disabled={loading}>Thử lại</Button></div>}
+      {data && loadedPeriod !== period && <p className="font-mono text-[10px] text-muted-foreground">Dữ liệu đang hiển thị thuộc kỳ {periods.find(([key]) => key === loadedPeriod)?.[1]}.</p>}
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.filter((card) => mainCardKeys.includes(card[2])).map(renderCard)}
       </section>
 
-      <section className="grid shrink-0 gap-4 lg:min-h-[260px] lg:flex-1 lg:grid-cols-12">
-        <div style={{ animationDelay: "120ms" }} className="animate-rise flex min-h-[240px] min-w-0 flex-col rounded-lg border bg-card p-4 backdrop-blur-md lg:col-span-8">
-          <div className="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3">
+      <section className="grid gap-4 xl:grid-cols-12">
+        <div style={{ animationDelay: "120ms" }} className="animate-rise min-w-0 rounded-lg border bg-card p-4 backdrop-blur-md xl:col-span-8">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="font-display text-[15px] font-bold">Doanh thu & chi phí</h2>
-              <p className="font-mono text-[10px] text-muted-foreground">Theo ngày</p>
+              <p className="font-mono text-[10px] text-muted-foreground">Theo kỳ đã chọn</p>
             </div>
-            <div className="flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-primary" />Doanh thu</span>
-              <span className="flex items-center gap-1.5"><span className="size-2 rounded-full bg-accent" />Chi phí</span>
-            </div>
+            <Button variant="ghost" size="sm" asChild><Link to="/finance">Xem thu chi <ArrowRight /></Link></Button>
           </div>
-          <div className="min-h-0 flex-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="dashboardRevenueFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="oklch(var(--primary))" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="oklch(var(--primary))" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="dashboardExpensesFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="oklch(var(--accent))" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="oklch(var(--accent))" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="oklch(var(--border) / var(--border-alpha))" vertical={false} />
-                <XAxis dataKey="label" axisLine={false} tickLine={false} fontSize={10} tick={chartAxisTick} />
-                <YAxis axisLine={false} tickLine={false} fontSize={10} tick={chartAxisTick} tickFormatter={compactMoney} />
-                <Tooltip formatter={(v: number) => formatVND(Number(v))} contentStyle={chartTooltipStyle} />
-                <Area type="monotone" dataKey="revenue" name="Doanh thu" stroke="oklch(var(--primary))" fill="url(#dashboardRevenueFill)" strokeWidth={2.5} />
-                <Area type="monotone" dataKey="expenses" name="Chi phí" stroke="oklch(var(--accent))" fill="url(#dashboardExpensesFill)" strokeWidth={2.5} />
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="h-48 w-full">
+            {chartData.length ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }} barCategoryGap="25%" barGap={4}>
+                  <XAxis dataKey="label" axisLine={false} tickLine={false} fontSize={9} tick={chartAxisTick} />
+                  <Tooltip formatter={(v: number) => formatVND(Number(v))} contentStyle={chartTooltipStyle} />
+                  <Bar dataKey="revenue" name="Doanh thu" fill="oklch(var(--primary))" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="expenses" name="Chi phí" fill="oklch(var(--accent))" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="grid h-full place-items-center rounded-md border border-dashed text-center text-muted-foreground"><div><Inbox className="mx-auto mb-2 size-6" /><p className="text-[12px]">{loading ? "Đang tải biểu đồ…" : data ? "Chưa có dữ liệu biểu đồ cho kỳ này" : "Chưa tải được dữ liệu biểu đồ"}</p></div></div>
+            )}
+          </div>
+          <div className="mt-2 flex justify-end gap-3 font-mono text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm bg-primary" />Doanh thu</span>
+            <span className="flex items-center gap-1.5"><span className="size-2 rounded-sm bg-accent" />Chi phí</span>
           </div>
         </div>
 
-        <div style={{ animationDelay: "180ms" }} className="animate-rise flex min-h-0 min-w-0 flex-col rounded-lg border bg-card p-4 backdrop-blur-md lg:col-span-4">
-          <h2 className="mb-3 shrink-0 font-display text-[15px] font-bold">Dòng tiền & hòa vốn</h2>
-          <div className="flex flex-1 flex-col justify-center gap-2">
-            <Mini label="Thực thu" value={data?.current.cashIn || 0} tone="success" />
-            <Mini label="Phải thu" value={data?.current.receivable || 0} tone="primary" />
-            <Mini label="Phải trả" value={data?.current.payable || 0} tone="destructive" />
-            <Mini label="Hòa vốn" value={data?.current.breakEvenRevenue || 0} tone="accent" />
+        <div style={{ animationDelay: "180ms" }} className="animate-rise min-w-0 rounded-lg border bg-card p-4 backdrop-blur-md xl:col-span-4">
+          <div className="mb-4 flex items-center justify-between gap-2"><h2 className="font-display text-[15px] font-bold">Cần xử lý</h2><span className="rounded bg-primary/10 px-2 py-1 font-mono text-[10px] text-primary">Công nợ & đơn hàng</span></div>
+          <div className="space-y-2">
+            <div className="rounded-md border-l-2 border-primary bg-primary/8 p-3"><p className="text-[13px] font-semibold">Công nợ phải thu</p><p className="text-[11px] text-muted-foreground">{data ? `${formatVND(data.current.receivable)} đang chờ thu` : "Chưa có dữ liệu"}</p></div>
+            <div className="rounded-md border-l-2 border-primary bg-primary/8 p-3"><p className="text-[13px] font-semibold">Công nợ phải trả</p><p className="text-[11px] text-muted-foreground">{data ? `${formatVND(data.current.payable)} cần thanh toán` : "Chưa có dữ liệu"}</p></div>
+            <div className="rounded-md border-l-2 border-primary bg-primary/8 p-3"><p className="text-[13px] font-semibold">Đơn chưa thanh toán gần đây</p><p className="text-[11px] text-muted-foreground">{!data ? "Chưa có dữ liệu" : pendingOrder ? `${pendingOrder.order_code || "Đơn hàng"} · ${formatVND(Number(pendingOrder.total))}` : "Không có đơn chờ thanh toán"}</p></div>
           </div>
+          <Button variant="outline" className="mt-4 w-full" asChild><Link to="/debts">Kiểm tra công nợ</Link></Button>
         </div>
       </section>
 
-      <section className="grid shrink-0 gap-4 lg:grid-cols-2">
+      <section className="space-y-3">
+        <h2 className="font-display text-[15px] font-bold">Tài chính chi tiết</h2>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {cards.filter((card) => detailCardKeys.includes(card[2])).map(renderCard)}
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
         <RecentTable title="Đơn hàng gần đây" rows={(data?.recentOrders || []).slice(0, 5).map((o) => [o.order_code || "—", o.customer_name || "Khách lẻ", formatVND(Number(o.total)), <span className={`rounded px-2 py-0.5 font-sans text-[10px] font-semibold ${paymentTone(o.payment_status)}`}>{paymentLabel(o.payment_status)}</span>])} />
         <RecentTable title="Hàng nhập gần đây" rows={(data?.recentPurchases || []).slice(0, 5).map((p) => [p.product_code || "—", p.product_name || "Sản phẩm", `${p.quantity} sp`, formatVND(Number(p.total))])} />
       </section>
@@ -236,16 +249,6 @@ export default function Dashboard() {
   );
 }
 
-const miniTones = {
-  success: "border-success bg-success/8",
-  primary: "border-primary bg-primary/8",
-  destructive: "border-destructive bg-destructive/8",
-  accent: "border-accent bg-accent/15",
-} as const;
-
-function Mini({ label, value, tone }: { label: string; value: number; tone: keyof typeof miniTones }) {
-  return <div className={`flex min-w-0 items-center justify-between gap-3 rounded-md border-l-2 px-3 py-2 ${miniTones[tone]}`}><div className="shrink-0 font-mono text-[10px] uppercase text-muted-foreground">{label}</div><div title={formatVND(value)} className="min-w-0 truncate font-display text-base font-extrabold">{formatVND(value)}</div></div>;
-}
 function paymentLabel(status: string) { return status === "paid" ? "Đã TT" : status === "partial" ? "TT một phần" : "Còn nợ"; }
 function paymentTone(status: string) { return status === "paid" ? "bg-success/10 text-success" : status === "partial" ? "bg-accent/35 text-accent-foreground" : "bg-destructive/10 text-destructive"; }
 function RecentTable({ title, rows }: { title: string; rows: ReactNode[][] }) {

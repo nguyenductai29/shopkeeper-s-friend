@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
+  BarChart3,
   FileText,
   HandCoins,
   LayoutDashboard,
   Lock,
   LogOut,
   Menu,
+  Package,
   PackagePlus,
   QrCode,
   ReceiptText,
@@ -34,6 +36,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
     items: [
       { label: "Tổng quan", icon: LayoutDashboard, to: "/" },
       { label: "Bán hàng (POS)", icon: ShoppingCart, to: "/pos" },
+      { label: "Tồn kho", icon: Package, to: "/inventory" },
       { label: "Đơn hàng", icon: ReceiptText, to: "/sales", admin: true },
       { label: "Nhập hàng", icon: PackagePlus, to: "/import", admin: true },
       { label: "Khách hàng", icon: Users, to: "/customers" },
@@ -42,6 +45,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
   {
     label: "Quản trị",
     items: [
+      { label: "Báo cáo", icon: BarChart3, to: "/reports", admin: true },
       { label: "Thu chi", icon: WalletCards, to: "/finance" },
       { label: "Công nợ", icon: HandCoins, to: "/debts", admin: true },
       { label: "Mẫu hóa đơn", icon: FileText, to: "/invoice-templates", admin: true },
