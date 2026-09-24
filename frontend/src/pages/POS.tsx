@@ -8,6 +8,7 @@ import { formatVND } from "@/lib/format";
 import { Banknote, Minus, Package, Plus, RotateCcw, ScanBarcode, Search, ShoppingBag, Trash2, WalletCards } from "lucide-react";
 import { toast } from "sonner";
 import { RefreshButton } from "@/components/RefreshButton";
+import { ProductImage } from "@/components/ProductImage";
 import { productsStore, ordersStore, settingsStore, type EntityId, type Product } from "@/lib/fileStore";
 import { productPricesInVnd } from "@/lib/currency";
 
@@ -288,9 +289,12 @@ export default function POS() {
                   : "cursor-pointer hover:-translate-y-0.5 hover:border-primary hover:shadow-sm"
               }`}
             >
-              <div className="mb-5 flex items-start justify-between gap-2">
+              <div className="mb-3 flex items-start justify-between gap-2">
                 <span className="truncate rounded bg-muted px-1.5 py-1 font-mono text-[9px]">{p.code}</span>
                 {outOfStock ? <span className="text-[10px] font-semibold text-destructive">Hết</span> : <Plus className="size-4 shrink-0 text-primary opacity-60 group-hover:opacity-100" />}
+              </div>
+              <div className="mb-3 flex h-32 items-center justify-center overflow-hidden rounded-md bg-background/70">
+                <ProductImage src={p.image_url} alt={p.name} className="h-full w-full object-contain" iconClassName="size-10" />
               </div>
               <p className="line-clamp-2 min-h-10 font-display text-sm font-bold leading-5">{p.name}</p>
               <div className="mt-2 flex items-end justify-between gap-2">
@@ -340,6 +344,9 @@ export default function POS() {
           {cart.map((x) => (
             <div key={x.id} className="rounded-lg border bg-background/70 p-3">
               <div className="flex justify-between gap-2">
+                <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-card">
+                  <ProductImage src={x.image_url} alt={x.name} className="h-full w-full object-contain" />
+                </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[13px] font-semibold">{x.name}</div>
                   <div className="font-mono text-[10px] text-muted-foreground">{formatVND(x.sale_price)} / sản phẩm</div>
