@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, dialog, shell } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const http = require('node:http')
@@ -88,7 +88,15 @@ async function startBackend() {
     process.env.FRONTEND_DIST_PATH = path.join(process.resourcesPath, 'frontend', 'dist')
   }
 
-  require(backendPath)
+  await require(backendPath).ready
+}
+
+function showStartupError(err) {
+  const envDir = isDev ? path.join(__dirname, '..') : path.dirname(process.execPath)
+  dialog.showErrorBox(
+    'ShopFlow không khởi động được',
+    `${err.message}\n\nKiểm tra kết nối mạng. Nếu cần đổi địa chỉ máy chủ, tạo file .env có dòng SHOP_KOME_API_URL=... trong thư mục:\n${envDir}`,
+  )
 }
 
 let win = null
@@ -126,8 +134,15 @@ if (!gotSingleInstanceLock) {
   })
 
   app.whenReady().then(async () => {
-    await startBackend()
-    setTimeout(createWindow, 800)
+    try {
+      await startBackend()
+    } catch (err) {
+      console.error('[main] Startup failed:', err)
+      showStartupError(err)
+      app.quit()
+      return
+    }
+    createWindow()
   })
 
   app.on('window-all-closed', () => {

@@ -46,7 +46,7 @@ async function request(path, options = {}) {
 }
 
 const apiRequest = request;
-async function health() { return request('/health'); }
+async function health() { return request('/health', { signal: AbortSignal.timeout(10000) }); }
 async function listProducts() { return request('/products'); }
 async function getProductById(id) { return request(`/products/${encodeURIComponent(id)}`); }
 async function findProductByCode(code) { return request(`/products/by-code/${encodeURIComponent(code)}`); }

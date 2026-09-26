@@ -49,16 +49,28 @@ if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => res.sendFile(path.join(distDir, 'index.html')));
 }
 
-health().then(() => {
+// Resolves once the server is listening. When embedded in Electron the caller
+// decides how to surface a failure; process.exit here would kill the whole app.
+const ready = health().catch((err) => {
+  const detail = err.cause?.code || err.message;
+  throw new Error(`Không kết nối được shared PostgreSQL API tại ${apiBaseUrl()} (${detail})`);
+}).then(() => new Promise((resolve, reject) => {
   const server = app.listen(PORT, HOST, () => {
     console.log(`ShopFlow backend: http://${HOST}:${PORT}`);
     console.log(`Shared API: ${apiBaseUrl()}`);
+    resolve(server);
   });
   server.on('error', (err) => {
     console.error(`[server] Không thể listen ${HOST}:${PORT}:`, err);
+    reject(new Error(`Không thể mở backend tại ${HOST}:${PORT} (${err.code || err.message})`));
+  });
+}));
+
+if (require.main === module) {
+  ready.catch((err) => {
+    console.error('[init]', err.message);
     process.exit(1);
   });
-}).catch(err => {
-  console.error('[init] Không kết nối được shared PostgreSQL API:', err.message);
-  process.exit(1);
-});
+}
+
+module.exports = { ready };
