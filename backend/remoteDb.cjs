@@ -1,6 +1,6 @@
 'use strict';
 
-const DEFAULT_API_BASE_URL = 'http://127.0.0.1:3000/api';
+const DEFAULT_API_BASE_URL = 'https://shop.imokome-cloud.com/api';
 
 function apiBaseUrl() {
   return String(process.env.SHOP_KOME_API_URL || process.env.SHOPFLOW_API_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '');
