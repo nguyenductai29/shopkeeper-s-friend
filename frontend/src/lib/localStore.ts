@@ -6,6 +6,7 @@ export type EntityId = number;
 export type Product = {
   id: EntityId;
   code: string;
+  barcode?: string | null;
   name: string;
   image_url: string | null;
   cost_price: number;

@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { formatVND } from "@/lib/format";
-import { ScanLine, Trash2, Plus, Minus, ShoppingCart, Package } from "lucide-react";
+import { Barcode, ScanLine, Trash2, Plus, Minus, ShoppingCart, Package } from "lucide-react";
 import { toast } from "sonner";
 import { ProductImage } from "@/components/ProductImage";
 import { RefreshButton } from "@/components/RefreshButton";
@@ -79,7 +79,10 @@ export default function POS() {
   const filtered = products.filter(
     (p) => {
       const keyword = query.trim().toLowerCase();
-      return !keyword || p.name.toLowerCase().includes(keyword) || p.code.toLowerCase().includes(keyword);
+      return !keyword
+        || p.name.toLowerCase().includes(keyword)
+        || p.code.toLowerCase().includes(keyword)
+        || Boolean(p.barcode?.toLowerCase().includes(keyword));
     }
   );
 
@@ -109,7 +112,7 @@ export default function POS() {
     const keyword = query.trim().toLowerCase();
     if (!keyword) return focusProductInput();
 
-    const exactCode = products.find((x) => x.code.toLowerCase() === keyword);
+    const exactCode = products.find((x) => x.code.toLowerCase() === keyword || x.barcode?.toLowerCase() === keyword);
     const product = exactCode || (filtered.length === 1 ? filtered[0] : null);
     if (product) {
       if (addToCart(product)) {
@@ -254,6 +257,10 @@ export default function POS() {
                   )}
                 </div>
                 <div className="truncate text-[11px] text-muted-foreground">{p.code}</div>
+                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <Barcode className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{p.barcode || "—"}</span>
+                </div>
                 <div className="line-clamp-2 min-h-8 text-xs font-medium leading-4">{p.name}</div>
                 <div className="mt-1 flex items-center justify-between gap-2">
                   <div className="truncate text-xs font-semibold text-primary">{formatVND(p.sale_price)}</div>

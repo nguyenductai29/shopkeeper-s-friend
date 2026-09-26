@@ -138,6 +138,17 @@ export const productsStore = {
   ): Promise<Product> {
     return apiFetch<Product>('/products/upsert', { method: 'POST', ...json(input) });
   },
+  async update(id: EntityId, patch: Partial<Pick<Product, 'name' | 'cost_price' | 'sale_price' | 'stock'>>): Promise<Product> {
+    return apiFetch<Product>(`/products/${id}`, { method: 'PUT', ...json(patch) });
+  },
+  // Permanent delete; the server explains refusals (e.g. product already sold) in `error`.
+  async remove(id: EntityId): Promise<void> {
+    const res = await fetch(`${BASE}/products/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || `API DELETE /products/${id} lỗi: ${res.status}`);
+    }
+  },
   async updateStock(id: EntityId, newStock: number): Promise<void> {
     await apiFetch('/products/' + id + '/stock', { method: 'PATCH', ...json({ stock: newStock }) });
   },

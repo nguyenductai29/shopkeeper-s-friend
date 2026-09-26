@@ -68,6 +68,9 @@ async function createProduct(input) {
 async function updateProduct(id, input) {
   return request(`/products/${encodeURIComponent(id)}`, { method: 'PUT', body: input });
 }
+async function deleteProductPermanently(id) {
+  return request(`/products/${encodeURIComponent(id)}/permanent`, { method: 'DELETE' });
+}
 async function changeInventory(productId, type, quantity, note) {
   return request(`/products/${encodeURIComponent(productId)}/inventory`, {
     method: 'POST',
@@ -79,4 +82,4 @@ async function listInventoryTransactions(productId) {
   return request(`/inventory/transactions${qs}`);
 }
 
-module.exports = { apiBaseUrl, request, apiRequest, health, listProducts, getProductById, findProductByCode, createProduct, updateProduct, changeInventory, listInventoryTransactions };
+module.exports = { apiBaseUrl, request, apiRequest, health, listProducts, getProductById, findProductByCode, createProduct, updateProduct, deleteProductPermanently, changeInventory, listInventoryTransactions };

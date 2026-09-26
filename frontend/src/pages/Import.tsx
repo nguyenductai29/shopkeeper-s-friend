@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { format } from "date-fns";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,17 @@ import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   ArrowDown,
   ArrowUp,
@@ -21,6 +32,7 @@ import {
   RefreshCw,
   Save,
   ScanLine,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -57,9 +69,20 @@ type Row = {
 };
 
 type SortKey = "id" | "created_at" | "product_code" | "product_name" | "cost_price" | "sale_price" | "quantity" | "total";
+type ProductSortKey = "code" | "barcode" | "name" | "cost_price" | "sale_price" | "stock";
 type SortDirection = "asc" | "desc";
+type ListTab = "products" | "history";
+
+type ProductDraft = {
+  id: EntityId;
+  name: string;
+  cost_price: number;
+  sale_price: number;
+  stock: number;
+};
 
 const PAGE_SIZE = 10;
+const ACTIONS_CELL = "sticky right-0 bg-card";
 
 function formatPriceInput(value: number) {
   const normalizedValue = Math.max(0, Number(value) || 0);
@@ -114,13 +137,382 @@ function compareValues(a: unknown, b: unknown) {
   return String(a ?? "").localeCompare(String(b ?? ""), "vi", { numeric: true, sensitivity: "base" });
 }
 
+function normalizeSearch(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/đ/g, "d").trim();
+}
+
+function SortHeader({
+  active,
+  direction,
+  onSort,
+  className = "",
+  children,
+}: {
+  active: boolean;
+  direction: SortDirection;
+  onSort: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const Icon = active ? (direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={onSort}
+        className="flex w-full items-center gap-1 text-left font-medium hover:text-foreground"
+      >
+        <span>{children}</span>
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+      </button>
+    </TableHead>
+  );
+}
+
+function ListPagination({
+  page,
+  totalPages,
+  rangeStart,
+  rangeEnd,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  rangeStart: number;
+  rangeEnd: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <div className="shrink-0 border-t px-4 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="text-sm text-muted-foreground">
+        Hiển thị {rangeStart}-{rangeEnd} / {total}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="icon" variant="outline" onClick={() => onPageChange(page - 1)} disabled={page <= 1}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <div className="min-w-24 text-center text-sm">
+          Trang {page} / {totalPages}
+        </div>
+        <Button size="icon" variant="outline" onClick={() => onPageChange(page + 1)} disabled={page >= totalPages}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ProductListPanel({
+  products,
+  search,
+  onSaved,
+  onDeleted,
+}: {
+  products: Product[];
+  search: string;
+  onSaved: (product: Product) => void;
+  onDeleted: (id: EntityId) => void;
+}) {
+  const [sort, setSort] = useState<{ key: ProductSortKey; direction: SortDirection }>({
+    key: "name",
+    direction: "asc",
+  });
+  const [page, setPage] = useState(1);
+  const [editing, setEditing] = useState<ProductDraft | null>(null);
+  const [savingId, setSavingId] = useState<EntityId | null>(null);
+  // The target outlives the open flag so the dialog text stays put while it animates closed.
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const filteredProducts = useMemo(() => {
+    const query = normalizeSearch(search);
+    const matches = query
+      ? products.filter((product) => normalizeSearch(`${product.code} ${product.barcode || ""} ${product.name}`).includes(query))
+      : products;
+    return [...matches].sort((a, b) => {
+      const result = compareValues(a[sort.key], b[sort.key]);
+      return sort.direction === "asc" ? result : -result;
+    });
+  }, [products, search, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const visibleProducts = filteredProducts.slice(pageStart, pageStart + PAGE_SIZE);
+  const rangeStart = filteredProducts.length === 0 ? 0 : pageStart + 1;
+  const rangeEnd = pageStart + visibleProducts.length;
+
+  useEffect(() => { setPage(1); }, [search]);
+
+  const handleSort = (key: ProductSortKey) => {
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+    setPage(1);
+  };
+
+  const startEdit = (product: Product) => {
+    setEditing({
+      id: product.id,
+      name: product.name,
+      cost_price: Number(product.cost_price || 0),
+      sale_price: Number(product.sale_price || 0),
+      stock: Number(product.stock || 0),
+    });
+  };
+
+  const updateDraft = <K extends keyof ProductDraft>(field: K, value: ProductDraft[K]) => {
+    setEditing((current) => (current ? { ...current, [field]: value } : current));
+  };
+
+  const saveEdit = async () => {
+    if (!editing || savingId !== null) return;
+    const name = editing.name.trim();
+    if (!name) return toast.error("Tên sản phẩm không được để trống");
+    if (!Number.isInteger(editing.stock) || editing.stock < 0) return toast.error("Tồn kho phải là số nguyên không âm");
+
+    setSavingId(editing.id);
+    try {
+      const updated = await productsStore.update(editing.id, {
+        name,
+        cost_price: editing.cost_price,
+        sale_price: editing.sale_price,
+        stock: editing.stock,
+      });
+      onSaved(updated);
+      setEditing(null);
+      toast.success("Đã cập nhật sản phẩm");
+    } catch {
+      toast.error("Lỗi khi cập nhật sản phẩm");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const askDelete = (product: Product) => {
+    setDeleteTarget(product);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    try {
+      await productsStore.remove(deleteTarget.id);
+      if (editing?.id === deleteTarget.id) setEditing(null);
+      onDeleted(deleteTarget.id);
+      toast.success(`Đã xoá vĩnh viễn: ${deleteTarget.name}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Lỗi khi xoá sản phẩm");
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  const handleEditKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveEdit();
+    } else if (event.key === "Escape") {
+      setEditing(null);
+    }
+  };
+
+  const sortProps = (key: ProductSortKey) => ({
+    active: sort.key === key,
+    direction: sort.direction,
+    onSort: () => handleSort(key),
+  });
+
+  return (
+    <>
+      <div className="min-h-0 flex-1 overflow-auto">
+        <Table className="min-w-[1080px]">
+          <TableHeader className="sticky top-0 z-10 bg-card">
+            <TableRow>
+              <TableHead className="w-16">Ảnh</TableHead>
+              <SortHeader {...sortProps("code")} className="w-36">Mã</SortHeader>
+              <SortHeader {...sortProps("barcode")} className="w-40">Barcode</SortHeader>
+              <SortHeader {...sortProps("name")}>Tên sản phẩm</SortHeader>
+              <SortHeader {...sortProps("cost_price")} className="w-32 text-right">Giá nhập</SortHeader>
+              <SortHeader {...sortProps("sale_price")} className="w-32 text-right">Giá bán</SortHeader>
+              <SortHeader {...sortProps("stock")} className="w-24 text-right">Tồn kho</SortHeader>
+              {/* Pinned so edit/delete stay reachable when a narrow window scrolls the table sideways. */}
+              <TableHead className={`w-28 text-right ${ACTIONS_CELL}`}>Thao tác</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visibleProducts.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center py-10 text-muted-foreground">
+                  <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                  {search.trim() ? "Không tìm thấy sản phẩm phù hợp." : "Chưa có sản phẩm nào."}
+                </TableCell>
+              </TableRow>
+            )}
+            {visibleProducts.map((product) => {
+              const draft = editing?.id === product.id ? editing : null;
+              const saving = savingId === product.id;
+              return (
+                <TableRow key={product.id}>
+                  <TableCell className="p-2">
+                    <div className="w-10 h-10 rounded bg-muted overflow-hidden flex items-center justify-center">
+                      {product.image_url ? (
+                        <ProductImage src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <Package className="w-4 h-4 text-muted-foreground/40" />
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>{product.code}</TableCell>
+                  <TableCell className={product.barcode ? "" : "text-muted-foreground"}>{product.barcode || "—"}</TableCell>
+                  {draft ? (
+                    <>
+                      <TableCell className="p-2">
+                        <Input
+                          autoFocus
+                          value={draft.name}
+                          onChange={(e) => updateDraft("name", e.target.value)}
+                          onKeyDown={handleEditKeyDown}
+                          className="h-9"
+                          placeholder="Tên sản phẩm"
+                        />
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          value={formatPriceInput(draft.cost_price)}
+                          onChange={(e) => updateDraft("cost_price", parsePriceInput(e.target.value))}
+                          onKeyDown={handleEditKeyDown}
+                          className="h-9 text-right"
+                        />
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          value={formatPriceInput(draft.sale_price)}
+                          onChange={(e) => updateDraft("sale_price", parsePriceInput(e.target.value))}
+                          onKeyDown={handleEditKeyDown}
+                          className="h-9 text-right"
+                        />
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={draft.stock}
+                          onChange={(e) => updateDraft("stock", Number(e.target.value))}
+                          onKeyDown={handleEditKeyDown}
+                          className="h-9 text-right"
+                        />
+                      </TableCell>
+                      <TableCell className={`text-right ${ACTIONS_CELL}`}>
+                        <div className="flex justify-end gap-1">
+                          <Button size="icon" variant="ghost" onClick={saveEdit} disabled={saving} title="Lưu (Enter)">
+                            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-primary" />}
+                          </Button>
+                          <Button size="icon" variant="ghost" onClick={() => setEditing(null)} disabled={saving} title="Huỷ (Esc)">
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </>
+                  ) : (
+                    <>
+                      <TableCell className="font-medium">{product.name}</TableCell>
+                      <TableCell className="text-right">{formatVND(product.cost_price)}</TableCell>
+                      <TableCell className="text-right">{formatVND(product.sale_price)}</TableCell>
+                      <TableCell className={`text-right font-medium ${product.stock <= 0 ? "text-destructive" : ""}`}>
+                        {product.stock}
+                      </TableCell>
+                      <TableCell className={`text-right ${ACTIONS_CELL}`}>
+                        <div className="flex justify-end gap-1">
+                          <Button size="icon" variant="ghost" onClick={() => startEdit(product)} title="Sửa">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => askDelete(product)}
+                            title="Xoá vĩnh viễn"
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </>
+                  )}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+      <ListPagination
+        page={currentPage}
+        totalPages={totalPages}
+        rangeStart={rangeStart}
+        rangeEnd={rangeEnd}
+        total={filteredProducts.length}
+        onPageChange={setPage}
+      />
+      <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => { if (!deleting) setDeleteDialogOpen(open); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Xoá vĩnh viễn sản phẩm?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  <span className="font-medium text-foreground">{deleteTarget?.name}</span>
+                  {" "}({deleteTarget?.code}{deleteTarget?.barcode ? ` · ${deleteTarget.barcode}` : ""})
+                  {" "}sẽ bị xoá khỏi cơ sở dữ liệu và không thể khôi phục.
+                </p>
+                <p>
+                  Lịch sử tồn kho của sản phẩm bị xoá theo. Phiếu nhập cũ vẫn giữ số tiền nhưng không còn tên sản phẩm.
+                  Sản phẩm đã có đơn bán sẽ không xoá được.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Huỷ</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                confirmDelete();
+              }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              Xoá vĩnh viễn
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
 function ImportPageInner() {
   const [scan, setScan] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [listTab, setListTab] = useState<ListTab>("products");
+  const [productSearch, setProductSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [backfillingImages, setBackfillingImages] = useState(false);
-  const [refreshingPurchases, setRefreshingPurchases] = useState(false);
+  const [refreshingLists, setRefreshingLists] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<{
     id: EntityId;
     cost_price: number;
@@ -142,16 +534,31 @@ function ImportPageInner() {
     return `draft-${Date.now()}-${draftKeyRef.current}`;
   };
 
-  const loadPurchases = async (showLoading = false) => {
-    if (showLoading) setRefreshingPurchases(true);
+  const loadLists = async (showLoading = false) => {
+    if (showLoading) setRefreshingLists(true);
     try {
-      setPurchases(await purchasesStore.list());
+      await Promise.all([
+        purchasesStore.list().then(setPurchases),
+        productsStore.list().then(setProducts),
+      ]);
+    } catch {
+      toast.error("Không tải được danh sách sản phẩm / lịch sử nhập hàng");
     } finally {
-      if (showLoading) setRefreshingPurchases(false);
+      if (showLoading) setRefreshingLists(false);
     }
   };
 
-  useEffect(() => { loadPurchases(); }, []);
+  useEffect(() => { loadLists(); }, []);
+
+  const handleProductSaved = (updated: Product) => {
+    setProducts((current) => current.map((product) => (product.id === updated.id ? updated : product)));
+  };
+
+  const handleProductDeleted = (id: EntityId) => {
+    setProducts((current) => current.filter((product) => product.id !== id));
+    // Purchase history rows of the deleted product lose their name; refresh them.
+    loadLists();
+  };
 
   useEffect(() => {
     const key = pendingNameFocusKeyRef.current;
@@ -313,21 +720,16 @@ function ImportPageInner() {
     sortKey: SortKey;
     className?: string;
     children: ReactNode;
-  }) => {
-    const Icon = sort.key === sortKey ? (sort.direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
-    return (
-      <TableHead className={className}>
-        <button
-          type="button"
-          onClick={() => handleSort(sortKey)}
-          className="flex w-full items-center gap-1 text-left font-medium hover:text-foreground"
-        >
-          <span>{children}</span>
-          <Icon className="h-3.5 w-3.5 shrink-0" />
-        </button>
-      </TableHead>
-    );
-  };
+  }) => (
+    <SortHeader
+      active={sort.key === sortKey}
+      direction={sort.direction}
+      onSort={() => handleSort(sortKey)}
+      className={className}
+    >
+      {children}
+    </SortHeader>
+  );
 
   const save = async () => {
     if (rows.length === 0) return toast.error("Chưa có hàng nào");
@@ -359,7 +761,7 @@ function ImportPageInner() {
       }
       toast.success(`Đã nhập ${rows.length} mặt hàng`);
       setRows([]);
-      await loadPurchases();
+      await loadLists();
       setPage(1);
     } catch {
       toast.error("Lỗi khi lưu");
@@ -431,6 +833,7 @@ function ImportPageInner() {
       }
 
       if (updated > 0) {
+        await loadLists();
         toast.success(`Đã cập nhật ảnh load được cho ${updated}/${targets.length} sản phẩm`);
       } else {
         toast.error(`Có ${targets.length} sản phẩm thiếu/ảnh lỗi nhưng chưa tìm được ảnh load được`);
@@ -468,7 +871,7 @@ function ImportPageInner() {
       });
       toast.success("Đã cập nhật lịch sử nhập hàng");
       setEditingPurchase(null);
-      await loadPurchases();
+      await loadLists();
     } catch {
       toast.error("Lỗi khi cập nhật lịch sử nhập hàng");
     }
@@ -485,7 +888,7 @@ function ImportPageInner() {
           <p className="text-muted-foreground text-sm mt-1">Quét hoặc nhập mã, sau đó điền thông tin & lưu</p>
         </div>
         <div className="flex gap-2">
-          <RefreshButton loading={refreshingPurchases} onClick={() => loadPurchases(true)} />
+          <RefreshButton loading={refreshingLists} onClick={() => loadLists(true)} />
           <Button variant="outline" onClick={backfillMissingImages} disabled={backfillingImages}>
             <RefreshCw className={`w-4 h-4 mr-2 ${backfillingImages ? "animate-spin" : ""}`} />
             {backfillingImages ? "Đang tải ảnh..." : "Tải ảnh thiếu"}
@@ -517,7 +920,7 @@ function ImportPageInner() {
       </Card>
 
       <div className="flex flex-1 min-h-0 flex-col gap-3">
-        <Card className="flex min-h-0 flex-1 flex-col overflow-hidden shadow-elegant">
+        <Card className={`flex min-h-0 flex-col overflow-hidden shadow-elegant ${rows.length > 0 ? "flex-1" : "shrink-0"}`}>
           <div className="shrink-0 border-b px-4 py-2">
             <div className="font-semibold">Phiếu nhập đang soạn</div>
           </div>
@@ -539,9 +942,11 @@ function ImportPageInner() {
               <TableBody>
                 {rows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
-                      <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                      Chưa có hàng nhập. Nhập mã vạch hoặc bấm Thêm tay ở phía trên.
+                    <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <Package className="w-5 h-5 opacity-40" />
+                        Chưa có hàng nhập. Nhập mã vạch hoặc bấm Thêm tay ở phía trên.
+                      </span>
                     </TableCell>
                   </TableRow>
                 )}
@@ -633,130 +1038,148 @@ function ImportPageInner() {
         </Card>
 
         <Card className="flex min-h-0 flex-1 flex-col overflow-hidden shadow-elegant">
-          <div className="shrink-0 border-b px-4 py-2 flex items-center justify-between gap-3">
-            <div>
-              <div className="font-semibold">Lịch sử nhập hàng</div>
-              <div className="text-xs text-muted-foreground">Danh sách phiếu nhập đã lưu</div>
+          <Tabs
+            value={listTab}
+            onValueChange={(value) => setListTab(value as ListTab)}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <div className="shrink-0 border-b px-4 py-2 flex flex-wrap items-center justify-between gap-3">
+              <TabsList className="h-9">
+                <TabsTrigger value="products">
+                  Danh sách sản phẩm
+                  <span className="ml-1.5 text-xs text-muted-foreground">{products.length}</span>
+                </TabsTrigger>
+                <TabsTrigger value="history">
+                  Lịch sử nhập hàng
+                  <span className="ml-1.5 text-xs text-muted-foreground">{purchases.length}</span>
+                </TabsTrigger>
+              </TabsList>
+              {listTab === "products" ? (
+                <div className="relative w-full sm:w-72">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    placeholder="Tìm theo tên, mã hoặc barcode..."
+                    className="h-9 pl-9"
+                  />
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground">Danh sách phiếu nhập đã lưu</div>
+              )}
             </div>
-            <div className="text-sm text-muted-foreground">{purchases.length} dòng</div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto">
-            <Table className="min-w-[1120px]">
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <SortableHead sortKey="id" className="w-20">ID</SortableHead>
-                  <SortableHead sortKey="created_at" className="w-40">Thời gian</SortableHead>
-                  <SortableHead sortKey="product_code" className="w-44">Mã</SortableHead>
-                  <SortableHead sortKey="product_name">Tên sản phẩm</SortableHead>
-                  <SortableHead sortKey="cost_price" className="w-32 text-right">Giá nhập</SortableHead>
-                  <SortableHead sortKey="sale_price" className="w-32 text-right">Giá bán</SortableHead>
-                  <SortableHead sortKey="quantity" className="w-24 text-right">SL</SortableHead>
-                  <SortableHead sortKey="total" className="w-36 text-right">Thành tiền</SortableHead>
-                  <TableHead className="w-28 text-right">Sửa</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visiblePurchases.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
-                      <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                      Chưa có lịch sử nhập hàng.
-                    </TableCell>
-                  </TableRow>
-                )}
-                {visiblePurchases.map((purchase) => (
-                  <TableRow key={purchase.id}>
-                    <TableCell className="font-medium">#{purchase.id}</TableCell>
-                    <TableCell>{formatDateTime(purchase.created_at)}</TableCell>
-                    <TableCell>{purchase.product_code}</TableCell>
-                    <TableCell className="font-medium">{purchase.product_name}</TableCell>
-                    {editingPurchase?.id === purchase.id ? (
-                      <>
-                        <TableCell className="p-2">
-                          <Input
-                            type="text"
-                            inputMode="numeric"
-                            value={formatPriceInput(editingPurchase.cost_price)}
-                            onChange={(e) => updateEditingPurchase("cost_price", parsePriceInput(e.target.value))}
-                            className="h-9 text-right"
-                          />
+            <TabsContent value="products" forceMount className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+              <ProductListPanel
+                products={products}
+                search={productSearch}
+                onSaved={handleProductSaved}
+                onDeleted={handleProductDeleted}
+              />
+            </TabsContent>
+            <TabsContent value="history" forceMount className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+              <div className="min-h-0 flex-1 overflow-auto">
+                <Table className="min-w-[1120px]">
+                  <TableHeader className="sticky top-0 z-10 bg-card">
+                    <TableRow>
+                      <SortableHead sortKey="id" className="w-20">ID</SortableHead>
+                      <SortableHead sortKey="created_at" className="w-40">Thời gian</SortableHead>
+                      <SortableHead sortKey="product_code" className="w-44">Mã</SortableHead>
+                      <SortableHead sortKey="product_name">Tên sản phẩm</SortableHead>
+                      <SortableHead sortKey="cost_price" className="w-32 text-right">Giá nhập</SortableHead>
+                      <SortableHead sortKey="sale_price" className="w-32 text-right">Giá bán</SortableHead>
+                      <SortableHead sortKey="quantity" className="w-24 text-right">SL</SortableHead>
+                      <SortableHead sortKey="total" className="w-36 text-right">Thành tiền</SortableHead>
+                      <TableHead className="w-28 text-right">Sửa</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visiblePurchases.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
+                          <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                          Chưa có lịch sử nhập hàng.
                         </TableCell>
-                        <TableCell className="p-2">
-                          <Input
-                            type="text"
-                            inputMode="numeric"
-                            value={formatPriceInput(editingPurchase.sale_price)}
-                            onChange={(e) => updateEditingPurchase("sale_price", parsePriceInput(e.target.value))}
-                            className="h-9 text-right"
-                          />
-                        </TableCell>
-                        <TableCell className="p-2">
-                          <Input
-                            type="number"
-                            min={1}
-                            value={editingPurchase.quantity}
-                            onChange={(e) => updateEditingPurchase("quantity", Number(e.target.value))}
-                            className="h-9 text-right"
-                          />
-                        </TableCell>
-                        <TableCell className="text-right font-semibold">
-                          {formatVND(editingPurchase.cost_price * editingPurchase.quantity)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button size="icon" variant="ghost" onClick={saveEditingPurchase}>
-                              <Check className="h-4 w-4 text-primary" />
-                            </Button>
-                            <Button size="icon" variant="ghost" onClick={() => setEditingPurchase(null)}>
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </>
-                    ) : (
-                      <>
-                        <TableCell className="text-right">{formatVND(purchase.cost_price)}</TableCell>
-                        <TableCell className="text-right">{formatVND(purchase.sale_price)}</TableCell>
-                        <TableCell className="text-right">{purchase.quantity}</TableCell>
-                        <TableCell className="text-right font-semibold">{formatVND(purchase.total)}</TableCell>
-                        <TableCell className="text-right">
-                          <Button size="icon" variant="ghost" onClick={() => startEditPurchase(purchase)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </>
+                      </TableRow>
                     )}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <div className="shrink-0 border-t px-4 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="text-sm text-muted-foreground">
-              Hiển thị {rangeStart}-{rangeEnd} / {sortedPurchases.length}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={() => setPage((value) => Math.max(1, value - 1))}
-                disabled={currentPage <= 1}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <div className="min-w-24 text-center text-sm">
-                Trang {currentPage} / {totalPages}
+                    {visiblePurchases.map((purchase) => (
+                      <TableRow key={purchase.id}>
+                        <TableCell className="font-medium">#{purchase.id}</TableCell>
+                        <TableCell>{formatDateTime(purchase.created_at)}</TableCell>
+                        <TableCell>{purchase.product_code || "—"}</TableCell>
+                        <TableCell className="font-medium">
+                          {purchase.product_name || <span className="font-normal italic text-muted-foreground">(SP đã xoá)</span>}
+                        </TableCell>
+                        {editingPurchase?.id === purchase.id ? (
+                          <>
+                            <TableCell className="p-2">
+                              <Input
+                                type="text"
+                                inputMode="numeric"
+                                value={formatPriceInput(editingPurchase.cost_price)}
+                                onChange={(e) => updateEditingPurchase("cost_price", parsePriceInput(e.target.value))}
+                                className="h-9 text-right"
+                              />
+                            </TableCell>
+                            <TableCell className="p-2">
+                              <Input
+                                type="text"
+                                inputMode="numeric"
+                                value={formatPriceInput(editingPurchase.sale_price)}
+                                onChange={(e) => updateEditingPurchase("sale_price", parsePriceInput(e.target.value))}
+                                className="h-9 text-right"
+                              />
+                            </TableCell>
+                            <TableCell className="p-2">
+                              <Input
+                                type="number"
+                                min={1}
+                                value={editingPurchase.quantity}
+                                onChange={(e) => updateEditingPurchase("quantity", Number(e.target.value))}
+                                className="h-9 text-right"
+                              />
+                            </TableCell>
+                            <TableCell className="text-right font-semibold">
+                              {formatVND(editingPurchase.cost_price * editingPurchase.quantity)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
+                                <Button size="icon" variant="ghost" onClick={saveEditingPurchase}>
+                                  <Check className="h-4 w-4 text-primary" />
+                                </Button>
+                                <Button size="icon" variant="ghost" onClick={() => setEditingPurchase(null)}>
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </>
+                        ) : (
+                          <>
+                            <TableCell className="text-right">{formatVND(purchase.cost_price)}</TableCell>
+                            <TableCell className="text-right">{formatVND(purchase.sale_price)}</TableCell>
+                            <TableCell className="text-right">{purchase.quantity}</TableCell>
+                            <TableCell className="text-right font-semibold">{formatVND(purchase.total)}</TableCell>
+                            <TableCell className="text-right">
+                              <Button size="icon" variant="ghost" onClick={() => startEditPurchase(purchase)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </>
+                        )}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-                disabled={currentPage >= totalPages}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
+              <ListPagination
+                page={currentPage}
+                totalPages={totalPages}
+                rangeStart={rangeStart}
+                rangeEnd={rangeEnd}
+                total={sortedPurchases.length}
+                onPageChange={setPage}
+              />
+            </TabsContent>
+          </Tabs>
         </Card>
       </div>
     </div>

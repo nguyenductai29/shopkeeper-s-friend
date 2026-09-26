@@ -8,6 +8,7 @@ const {
   findProductByCode,
   createProduct,
   updateProduct,
+  deleteProductPermanently,
   changeInventory,
 } = require('../remoteDb.cjs');
 
@@ -25,6 +26,7 @@ function toLegacyProduct(product) {
   return {
     id: product.id,
     code: product.code,
+    barcode: product.barcode || null,
     name: product.name,
     image_url: resolveImageUrl(product.image ?? product.image_url),
     cost_price: Number(product.purchasePrice ?? product.purchase_price ?? 0),
@@ -87,23 +89,66 @@ router.post('/upsert', async (req, res, next) => {
   }
 });
 
+// Stock is only changed through inventory transactions so the shared API keeps an audit trail.
+async function adjustStockTo(product, stock) {
+  const target = Math.max(0, Number(stock ?? 0) || 0);
+  const delta = target - Number(product.quantity ?? 0);
+  if (delta === 0) return product;
+
+  const result = await changeInventory(
+    product.id,
+    delta > 0 ? 'IMPORT' : 'EXPORT',
+    Math.abs(delta),
+    'Điều chỉnh tồn kho từ ShopFlow',
+  );
+  return result.product || { ...product, quantity: target };
+}
+
+router.put('/:id', async (req, res, next) => {
+  try {
+    const existing = await getProductById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'product_not_found' });
+
+    const input = req.body || {};
+    const name = String(input.name ?? existing.name ?? '').trim();
+    if (!name) return res.status(400).json({ error: 'Tên sản phẩm không được để trống' });
+
+    let updated = await updateProduct(existing.id, {
+      name,
+      image: existing.image ?? null,
+      purchasePrice: Math.max(0, Number(input.cost_price ?? existing.purchasePrice ?? 0) || 0),
+      salePrice: Math.max(0, Number(input.sale_price ?? existing.salePrice ?? 0) || 0),
+      currency: existing.currency || 'JPY',
+      barcode: existing.barcode || existing.code || null,
+    });
+
+    if (input.stock !== undefined) {
+      updated = await adjustStockTo({ ...existing, ...updated }, input.stock);
+    }
+    res.json(toLegacyProduct({ ...existing, ...updated }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id', async (req, res, next) => {
+  try {
+    res.json(await deleteProductPermanently(req.params.id));
+  } catch (err) {
+    // A shared API deployed before permanent delete existed answers with Express's HTML 404.
+    if (err.status === 404 && typeof err.body === 'string') {
+      return res.status(501).json({ error: 'Máy chủ dữ liệu chưa hỗ trợ xoá vĩnh viễn. Cần cập nhật và deploy lại API dùng chung.' });
+    }
+    next(err);
+  }
+});
+
 router.patch('/:id/stock', async (req, res, next) => {
   try {
     const product = await getProductById(req.params.id);
     if (!product) return res.status(404).json({ error: 'product_not_found' });
 
-    const target = Math.max(0, Number(req.body?.stock ?? 0) || 0);
-    const current = Number(product.quantity ?? 0);
-    const delta = target - current;
-
-    if (delta !== 0) {
-      await changeInventory(
-        product.id,
-        delta > 0 ? 'IMPORT' : 'EXPORT',
-        Math.abs(delta),
-        'Điều chỉnh tồn kho từ ShopFlow',
-      );
-    }
+    await adjustStockTo(product, req.body?.stock);
     res.json({ ok: true });
   } catch (err) {
     next(err);
