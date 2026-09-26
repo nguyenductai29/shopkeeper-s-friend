@@ -8,11 +8,16 @@ const {
   findProductByCode,
   createProduct,
   updateProduct,
+  uploadProductImage,
   deleteProductPermanently,
   changeInventory,
 } = require('../remoteDb.cjs');
 
 const router = express.Router();
+
+// Same formats and size limit the shared API accepts; it converts the upload to WebP.
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
 function resolveImageUrl(value) {
   if (!value) return null;
@@ -130,6 +135,38 @@ router.put('/:id', async (req, res, next) => {
     next(err);
   }
 });
+
+const rawImageBody = express.raw({ type: () => true, limit: MAX_IMAGE_BYTES });
+function readImageBody(req, res, next) {
+  rawImageBody(req, res, (err) => {
+    if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'Ảnh quá lớn (tối đa 15MB).' });
+    next(err);
+  });
+}
+
+// The browser sends the file as the raw request body; X-File-Name carries its (URI-encoded) name.
+router.post(
+  '/:id/image',
+  readImageBody,
+  async (req, res, next) => {
+    try {
+      const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (!IMAGE_TYPES.has(mimeType)) {
+        return res.status(415).json({ error: 'Chỉ nhận ảnh JPEG, PNG, WebP hoặc HEIC.' });
+      }
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: 'Chưa có dữ liệu ảnh.' });
+      }
+      let filename = 'image';
+      try { filename = decodeURIComponent(String(req.headers['x-file-name'] || 'image')); } catch { /* keep default */ }
+
+      await uploadProductImage(req.params.id, { buffer: req.body, mimeType, filename });
+      res.json(toLegacyProduct(await getProductById(req.params.id)));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 router.delete('/:id', async (req, res, next) => {
   try {

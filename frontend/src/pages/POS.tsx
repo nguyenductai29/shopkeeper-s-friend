@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ export default function POS() {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const productInputRef = useRef<HTMLInputElement>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const focusProductInput = () => {
     window.setTimeout(() => productInputRef.current?.focus(), 0);
@@ -75,6 +77,15 @@ export default function POS() {
     load();
     focusProductInput();
   }, []);
+
+  // The header search box sends its query here as ?q=; consume it once.
+  useEffect(() => {
+    const incoming = searchParams.get("q");
+    if (incoming === null) return;
+    setQuery(incoming);
+    setSearchParams({}, { replace: true });
+    focusProductInput();
+  }, [searchParams, setSearchParams]);
 
   const filtered = products.filter(
     (p) => {
@@ -197,7 +208,7 @@ export default function POS() {
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
       <div className="flex shrink-0 items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-semibold">Bán hàng</h1>
+          <h1 className="font-display text-[26px] font-extrabold leading-tight">Bán hàng</h1>
           <p className="text-muted-foreground text-sm mt-1">Chọn sản phẩm hoặc quét mã để thêm vào giỏ</p>
         </div>
         <RefreshButton loading={refreshing} onClick={() => load(true)} />

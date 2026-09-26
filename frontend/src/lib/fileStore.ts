@@ -121,6 +121,19 @@ export async function canLoadImageUrl(url: string | null | undefined, timeoutMs 
   });
 }
 
+export const PRODUCT_IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif';
+export const PRODUCT_IMAGE_MAX_BYTES = 15 * 1024 * 1024;
+
+// Windows often reports HEIC files with an empty type, so fall back to the extension.
+export function imageMimeType(file: File): string {
+  if (file.type) return file.type;
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  const byExt: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif',
+  };
+  return (ext && byExt[ext]) || 'application/octet-stream';
+}
+
 // ===== Products =====
 export const productsStore = {
   async list(): Promise<Product[]> {
@@ -140,6 +153,18 @@ export const productsStore = {
   },
   async update(id: EntityId, patch: Partial<Pick<Product, 'name' | 'cost_price' | 'sale_price' | 'stock'>>): Promise<Product> {
     return apiFetch<Product>(`/products/${id}`, { method: 'PUT', ...json(patch) });
+  },
+  async uploadImage(id: EntityId, file: File): Promise<Product> {
+    const res = await fetch(`${BASE}/products/${id}/image`, {
+      method: 'POST',
+      headers: { 'Content-Type': imageMimeType(file), 'X-File-Name': encodeURIComponent(file.name) },
+      body: file,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || `Tải ảnh lỗi: ${res.status}`);
+    }
+    return res.json();
   },
   // Permanent delete; the server explains refusals (e.g. product already sold) in `error`.
   async remove(id: EntityId): Promise<void> {

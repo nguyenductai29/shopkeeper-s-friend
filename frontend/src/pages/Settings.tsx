@@ -128,7 +128,7 @@ function Inner() {
     <div className="flex h-full min-h-0 max-w-5xl flex-col gap-3 overflow-hidden">
       <div className="flex shrink-0 items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-semibold">Cài đặt</h1>
+          <h1 className="font-display text-[26px] font-extrabold leading-tight">Cài đặt</h1>
           <p className="text-muted-foreground text-sm mt-1">Cài đặt thông báo và ứng dụng</p>
         </div>
         <RefreshButton loading={refreshing} onClick={() => loadSettings(true)} />

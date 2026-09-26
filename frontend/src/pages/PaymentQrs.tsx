@@ -88,7 +88,7 @@ function Inner() {
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold md:text-3xl">VietQR</h1>
+          <h1 className="font-display text-[26px] font-extrabold leading-tight">VietQR</h1>
           <p className="mt-1 text-sm text-muted-foreground">Quản lý QR thanh toán dùng trong footer hóa đơn</p>
         </div>
         <div className="flex gap-2">

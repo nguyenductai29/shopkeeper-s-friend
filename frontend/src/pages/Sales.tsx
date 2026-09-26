@@ -244,7 +244,7 @@ function Inner() {
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold md:text-3xl">Quản lý bán hàng</h1>
+          <h1 className="font-display text-[26px] font-extrabold leading-tight">Quản lý bán hàng</h1>
           <p className="mt-1 text-sm text-muted-foreground">Theo dõi đơn hàng, doanh thu và trạng thái thanh toán</p>
         </div>
         <div className="flex gap-2">
@@ -293,7 +293,7 @@ function Inner() {
         <Card className="flex min-h-0 flex-col overflow-hidden shadow-elegant">
           <div className="min-h-0 flex-1 overflow-auto">
             <Table className="min-w-[1040px]">
-              <TableHeader className="sticky top-0 z-10 bg-card">
+              <TableHeader className="sticky top-0 z-10">
                 <TableRow>
                   <SortableHead sortKey="id" className="w-20">ID</SortableHead>
                   <SortableHead sortKey="created_at" className="w-40">Thời gian</SortableHead>

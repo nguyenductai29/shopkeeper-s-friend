@@ -1,6 +1,6 @@
 {
   "name": "shopflow",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -89,6 +89,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
+    "@fontsource-variable/sora": "^5.3.0",
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",

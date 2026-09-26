@@ -16,14 +16,16 @@ function normalizePath(path) {
 async function request(path, options = {}) {
   const url = `${apiBaseUrl()}${normalizePath(path)}`;
   const next = { ...options };
-  if (next.body && typeof next.body !== 'string' && !(next.body instanceof Buffer)) {
+  // fetch sets the multipart boundary itself, so FormData bodies must not get a JSON Content-Type.
+  const isForm = next.body instanceof FormData;
+  if (next.body && !isForm && typeof next.body !== 'string' && !(next.body instanceof Buffer)) {
     next.body = JSON.stringify(next.body);
   }
   const response = await fetch(url, {
     ...next,
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/json',
+      ...(isForm ? {} : { 'Content-Type': 'application/json' }),
       ...(options.headers || {}),
     },
   });
@@ -68,6 +70,11 @@ async function createProduct(input) {
 async function updateProduct(id, input) {
   return request(`/products/${encodeURIComponent(id)}`, { method: 'PUT', body: input });
 }
+async function uploadProductImage(id, { buffer, mimeType, filename }) {
+  const form = new FormData();
+  form.append('image', new Blob([buffer], { type: mimeType }), filename || 'image');
+  return request(`/products/${encodeURIComponent(id)}/image`, { method: 'POST', body: form });
+}
 async function deleteProductPermanently(id) {
   return request(`/products/${encodeURIComponent(id)}/permanent`, { method: 'DELETE' });
 }
@@ -82,4 +89,4 @@ async function listInventoryTransactions(productId) {
   return request(`/inventory/transactions${qs}`);
 }
 
-module.exports = { apiBaseUrl, request, apiRequest, health, listProducts, getProductById, findProductByCode, createProduct, updateProduct, deleteProductPermanently, changeInventory, listInventoryTransactions };
+module.exports = { apiBaseUrl, request, apiRequest, health, listProducts, getProductById, findProductByCode, createProduct, updateProduct, uploadProductImage, deleteProductPermanently, changeInventory, listInventoryTransactions };

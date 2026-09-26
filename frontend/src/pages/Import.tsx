@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type DragEvent,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { format } from "date-fns";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -7,6 +16,15 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,6 +43,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileSpreadsheet,
+  ImagePlus,
   Loader2,
   Package,
   Pencil,
@@ -34,6 +53,7 @@ import {
   ScanLine,
   Search,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -42,7 +62,10 @@ import { AdminGate } from "@/components/AdminGate";
 import { ProductImage } from "@/components/ProductImage";
 import { RefreshButton } from "@/components/RefreshButton";
 import {
+  PRODUCT_IMAGE_ACCEPT,
+  PRODUCT_IMAGE_MAX_BYTES,
   canLoadImageUrl,
+  imageMimeType,
   isPlaceholderImageUrl,
   productLookupStore,
   productsStore,
@@ -204,6 +227,272 @@ function ListPagination({
   );
 }
 
+const PRODUCT_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+
+function ProductEditDialog({
+  product,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  product: Product;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: (product: Product) => void;
+}) {
+  const [draft, setDraft] = useState<ProductDraft>(() => ({
+    id: product.id,
+    name: product.name,
+    cost_price: Number(product.cost_price || 0),
+    sale_price: Number(product.sale_price || 0),
+    stock: Number(product.stock || 0),
+  }));
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  // Chromium cannot decode HEIC, so those uploads show a file card instead of a preview.
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setPreviewFailed(false);
+    if (!imageFile) {
+      setImagePreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(imageFile);
+    setImagePreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageFile]);
+
+  const updateDraft = <K extends keyof ProductDraft>(field: K, value: ProductDraft[K]) => {
+    setDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const pickFile = (file: File | undefined | null) => {
+    if (!file) return;
+    if (!PRODUCT_IMAGE_TYPES.has(imageMimeType(file))) {
+      toast.error("Chỉ nhận ảnh JPEG, PNG, WebP hoặc HEIC");
+      return;
+    }
+    if (file.size > PRODUCT_IMAGE_MAX_BYTES) {
+      toast.error("Ảnh quá lớn (tối đa 15MB)");
+      return;
+    }
+    setImageFile(file);
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    const file = [...event.clipboardData.files].find((item) => PRODUCT_IMAGE_TYPES.has(imageMimeType(item)));
+    if (!file) return;
+    event.preventDefault();
+    pickFile(file);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    pickFile(event.dataTransfer.files[0]);
+  };
+
+  const stockDelta = draft.stock - Number(product.stock || 0);
+  const fieldsChanged = draft.name.trim() !== product.name
+    || draft.cost_price !== Number(product.cost_price || 0)
+    || draft.sale_price !== Number(product.sale_price || 0)
+    || stockDelta !== 0;
+
+  const save = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (saving) return;
+    const name = draft.name.trim();
+    if (!name) return toast.error("Tên sản phẩm không được để trống");
+    if (!Number.isInteger(draft.stock) || draft.stock < 0) return toast.error("Tồn kho phải là số nguyên không âm");
+
+    setSaving(true);
+    try {
+      if (fieldsChanged) {
+        onSaved(await productsStore.update(product.id, {
+          name,
+          cost_price: draft.cost_price,
+          sale_price: draft.sale_price,
+          stock: draft.stock,
+        }));
+      }
+      if (imageFile) {
+        try {
+          onSaved(await productsStore.uploadImage(product.id, imageFile));
+          setImageFile(null);
+        } catch (error) {
+          // Fields are already saved; keep the dialog open so the image can be retried.
+          const reason = error instanceof Error ? error.message : "lỗi không xác định";
+          toast.error(fieldsChanged ? `Đã lưu thông tin nhưng chưa tải được ảnh: ${reason}` : `Chưa tải được ảnh: ${reason}`);
+          return;
+        }
+      }
+      toast.success("Đã cập nhật sản phẩm");
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Lỗi khi cập nhật sản phẩm");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }}>
+      <DialogContent className="max-w-2xl" onPaste={handlePaste}>
+        <DialogHeader>
+          <DialogTitle>Sửa sản phẩm</DialogTitle>
+          <DialogDescription>
+            {product.code}
+            {product.barcode ? ` · ${product.barcode}` : ""}
+          </DialogDescription>
+        </DialogHeader>
+
+        <form id="product-edit-form" onSubmit={save} className="grid gap-5 sm:grid-cols-[200px_minmax(0,1fr)]">
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={handleDrop}
+              disabled={saving}
+              title="Bấm để chọn ảnh"
+              className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border border-dashed transition-colors ${
+                dragging ? "border-primary bg-primary/5" : "bg-muted/40 hover:border-primary/60"
+              }`}
+            >
+              {imagePreview && !previewFailed ? (
+                <img
+                  src={imagePreview}
+                  alt="Ảnh mới"
+                  className="h-full w-full object-contain"
+                  onError={() => setPreviewFailed(true)}
+                />
+              ) : imageFile ? (
+                <div className="px-3 text-center text-xs text-muted-foreground">
+                  <ImagePlus className="mx-auto mb-2 h-8 w-8 opacity-60" />
+                  <div className="break-all font-medium text-foreground">{imageFile.name}</div>
+                  <div className="mt-1">Sẽ chuyển sang WebP khi lưu</div>
+                </div>
+              ) : product.image_url ? (
+                <ProductImage src={product.image_url} alt={product.name} className="h-full w-full object-contain" iconClassName="h-8 w-8" />
+              ) : (
+                <div className="text-center text-xs text-muted-foreground">
+                  <ImagePlus className="mx-auto mb-2 h-8 w-8 opacity-50" />
+                  Chưa có ảnh
+                </div>
+              )}
+              {imageFile && (
+                <span className="absolute left-2 top-2 rounded bg-primary px-1.5 py-0.5 font-mono text-[9px] uppercase text-primary-foreground">
+                  Ảnh mới
+                </span>
+              )}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={PRODUCT_IMAGE_ACCEPT}
+              className="hidden"
+              onChange={(event) => {
+                pickFile(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={saving}
+              >
+                <Upload /> {product.image_url || imageFile ? "Đổi ảnh" : "Tải ảnh lên"}
+              </Button>
+              {imageFile && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setImageFile(null)} disabled={saving}>
+                  Bỏ chọn
+                </Button>
+              )}
+            </div>
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Kéo thả, dán (Ctrl+V) hoặc chọn file từ máy. JPEG, PNG, WebP, HEIC · tối đa 15MB.
+            </p>
+          </div>
+
+          <div className="grid content-start gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="product-edit-name">Tên sản phẩm</Label>
+              <Input
+                id="product-edit-name"
+                autoFocus
+                value={draft.name}
+                onChange={(event) => updateDraft("name", event.target.value)}
+                placeholder="Tên sản phẩm"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="product-edit-cost">Giá nhập</Label>
+                <Input
+                  id="product-edit-cost"
+                  inputMode="numeric"
+                  className="text-right"
+                  value={formatPriceInput(draft.cost_price)}
+                  onChange={(event) => updateDraft("cost_price", parsePriceInput(event.target.value))}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="product-edit-sale">Giá bán</Label>
+                <Input
+                  id="product-edit-sale"
+                  inputMode="numeric"
+                  className="text-right"
+                  value={formatPriceInput(draft.sale_price)}
+                  onChange={(event) => updateDraft("sale_price", parsePriceInput(event.target.value))}
+                />
+              </div>
+            </div>
+            {draft.sale_price > 0 && draft.sale_price < draft.cost_price && (
+              <p className="text-[11px] text-destructive">Giá bán đang thấp hơn giá nhập.</p>
+            )}
+            <div className="grid gap-1.5">
+              <Label htmlFor="product-edit-stock">Tồn kho</Label>
+              <Input
+                id="product-edit-stock"
+                type="number"
+                min={0}
+                step={1}
+                className="text-right"
+                value={draft.stock}
+                onChange={(event) => updateDraft("stock", Number(event.target.value))}
+              />
+              {stockDelta !== 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  Sẽ ghi giao dịch {stockDelta > 0 ? "nhập" : "xuất"} kho {Math.abs(stockDelta)} sản phẩm.
+                </p>
+              )}
+            </div>
+          </div>
+        </form>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Huỷ
+          </Button>
+          <Button type="submit" form="product-edit-form" disabled={saving || (!fieldsChanged && !imageFile)}>
+            {saving ? <Loader2 className="animate-spin" /> : <Save />}
+            Lưu thay đổi
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ProductListPanel({
   products,
   search,
@@ -220,9 +509,11 @@ function ProductListPanel({
     direction: "asc",
   });
   const [page, setPage] = useState(1);
-  const [editing, setEditing] = useState<ProductDraft | null>(null);
-  const [savingId, setSavingId] = useState<EntityId | null>(null);
-  // The target outlives the open flag so the dialog text stays put while it animates closed.
+  // Targets outlive their open flags so dialog content stays put while it animates closed.
+  const [editTarget, setEditTarget] = useState<Product | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  // Remounts the edit dialog on every open so its form starts from the product's current values.
+  const [editSession, setEditSession] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -255,42 +546,15 @@ function ProductListPanel({
     setPage(1);
   };
 
-  const startEdit = (product: Product) => {
-    setEditing({
-      id: product.id,
-      name: product.name,
-      cost_price: Number(product.cost_price || 0),
-      sale_price: Number(product.sale_price || 0),
-      stock: Number(product.stock || 0),
-    });
+  const openEditor = (product: Product) => {
+    setEditTarget(product);
+    setEditSession((session) => session + 1);
+    setEditOpen(true);
   };
 
-  const updateDraft = <K extends keyof ProductDraft>(field: K, value: ProductDraft[K]) => {
-    setEditing((current) => (current ? { ...current, [field]: value } : current));
-  };
-
-  const saveEdit = async () => {
-    if (!editing || savingId !== null) return;
-    const name = editing.name.trim();
-    if (!name) return toast.error("Tên sản phẩm không được để trống");
-    if (!Number.isInteger(editing.stock) || editing.stock < 0) return toast.error("Tồn kho phải là số nguyên không âm");
-
-    setSavingId(editing.id);
-    try {
-      const updated = await productsStore.update(editing.id, {
-        name,
-        cost_price: editing.cost_price,
-        sale_price: editing.sale_price,
-        stock: editing.stock,
-      });
-      onSaved(updated);
-      setEditing(null);
-      toast.success("Đã cập nhật sản phẩm");
-    } catch {
-      toast.error("Lỗi khi cập nhật sản phẩm");
-    } finally {
-      setSavingId(null);
-    }
+  const handleEditorSaved = (updated: Product) => {
+    setEditTarget(updated);
+    onSaved(updated);
   };
 
   const askDelete = (product: Product) => {
@@ -303,7 +567,7 @@ function ProductListPanel({
     setDeleting(true);
     try {
       await productsStore.remove(deleteTarget.id);
-      if (editing?.id === deleteTarget.id) setEditing(null);
+      if (editTarget?.id === deleteTarget.id) setEditOpen(false);
       onDeleted(deleteTarget.id);
       toast.success(`Đã xoá vĩnh viễn: ${deleteTarget.name}`);
     } catch (error) {
@@ -311,15 +575,6 @@ function ProductListPanel({
     } finally {
       setDeleting(false);
       setDeleteDialogOpen(false);
-    }
-  };
-
-  const handleEditKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      saveEdit();
-    } else if (event.key === "Escape") {
-      setEditing(null);
     }
   };
 
@@ -333,7 +588,7 @@ function ProductListPanel({
     <>
       <div className="min-h-0 flex-1 overflow-auto">
         <Table className="min-w-[1080px]">
-          <TableHeader className="sticky top-0 z-10 bg-card">
+          <TableHeader className="sticky top-0 z-10">
             <TableRow>
               <TableHead className="w-16">Ảnh</TableHead>
               <SortHeader {...sortProps("code")} className="w-36">Mã</SortHeader>
@@ -343,7 +598,7 @@ function ProductListPanel({
               <SortHeader {...sortProps("sale_price")} className="w-32 text-right">Giá bán</SortHeader>
               <SortHeader {...sortProps("stock")} className="w-24 text-right">Tồn kho</SortHeader>
               {/* Pinned so edit/delete stay reachable when a narrow window scrolls the table sideways. */}
-              <TableHead className={`w-28 text-right ${ACTIONS_CELL}`}>Thao tác</TableHead>
+              <TableHead className="sticky right-0 w-28 bg-table-head text-right">Thao tác</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -355,105 +610,43 @@ function ProductListPanel({
                 </TableCell>
               </TableRow>
             )}
-            {visibleProducts.map((product) => {
-              const draft = editing?.id === product.id ? editing : null;
-              const saving = savingId === product.id;
-              return (
-                <TableRow key={product.id}>
-                  <TableCell className="p-2">
-                    <div className="w-10 h-10 rounded bg-muted overflow-hidden flex items-center justify-center">
-                      {product.image_url ? (
-                        <ProductImage src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <Package className="w-4 h-4 text-muted-foreground/40" />
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>{product.code}</TableCell>
-                  <TableCell className={product.barcode ? "" : "text-muted-foreground"}>{product.barcode || "—"}</TableCell>
-                  {draft ? (
-                    <>
-                      <TableCell className="p-2">
-                        <Input
-                          autoFocus
-                          value={draft.name}
-                          onChange={(e) => updateDraft("name", e.target.value)}
-                          onKeyDown={handleEditKeyDown}
-                          className="h-9"
-                          placeholder="Tên sản phẩm"
-                        />
-                      </TableCell>
-                      <TableCell className="p-2">
-                        <Input
-                          type="text"
-                          inputMode="numeric"
-                          value={formatPriceInput(draft.cost_price)}
-                          onChange={(e) => updateDraft("cost_price", parsePriceInput(e.target.value))}
-                          onKeyDown={handleEditKeyDown}
-                          className="h-9 text-right"
-                        />
-                      </TableCell>
-                      <TableCell className="p-2">
-                        <Input
-                          type="text"
-                          inputMode="numeric"
-                          value={formatPriceInput(draft.sale_price)}
-                          onChange={(e) => updateDraft("sale_price", parsePriceInput(e.target.value))}
-                          onKeyDown={handleEditKeyDown}
-                          className="h-9 text-right"
-                        />
-                      </TableCell>
-                      <TableCell className="p-2">
-                        <Input
-                          type="number"
-                          min={0}
-                          step={1}
-                          value={draft.stock}
-                          onChange={(e) => updateDraft("stock", Number(e.target.value))}
-                          onKeyDown={handleEditKeyDown}
-                          className="h-9 text-right"
-                        />
-                      </TableCell>
-                      <TableCell className={`text-right ${ACTIONS_CELL}`}>
-                        <div className="flex justify-end gap-1">
-                          <Button size="icon" variant="ghost" onClick={saveEdit} disabled={saving} title="Lưu (Enter)">
-                            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 text-primary" />}
-                          </Button>
-                          <Button size="icon" variant="ghost" onClick={() => setEditing(null)} disabled={saving} title="Huỷ (Esc)">
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </>
-                  ) : (
-                    <>
-                      <TableCell className="font-medium">{product.name}</TableCell>
-                      <TableCell className="text-right">{formatVND(product.cost_price)}</TableCell>
-                      <TableCell className="text-right">{formatVND(product.sale_price)}</TableCell>
-                      <TableCell className={`text-right font-medium ${product.stock <= 0 ? "text-destructive" : ""}`}>
-                        {product.stock}
-                      </TableCell>
-                      <TableCell className={`text-right ${ACTIONS_CELL}`}>
-                        <div className="flex justify-end gap-1">
-                          <Button size="icon" variant="ghost" onClick={() => startEdit(product)} title="Sửa">
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => askDelete(product)}
-                            title="Xoá vĩnh viễn"
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </>
-                  )}
-                </TableRow>
-              );
-            })}
+            {visibleProducts.map((product) => (
+              <TableRow key={product.id} onDoubleClick={() => openEditor(product)} className="cursor-default">
+                <TableCell className="p-2">
+                  <div className="w-10 h-10 rounded bg-muted overflow-hidden flex items-center justify-center">
+                    {product.image_url ? (
+                      <ProductImage src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <Package className="w-4 h-4 text-muted-foreground/40" />
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>{product.code}</TableCell>
+                <TableCell className={product.barcode ? "" : "text-muted-foreground"}>{product.barcode || "—"}</TableCell>
+                <TableCell className="font-medium">{product.name}</TableCell>
+                <TableCell className="text-right">{formatVND(product.cost_price)}</TableCell>
+                <TableCell className="text-right">{formatVND(product.sale_price)}</TableCell>
+                <TableCell className={`text-right font-medium ${product.stock <= 0 ? "text-destructive" : ""}`}>
+                  {product.stock}
+                </TableCell>
+                <TableCell className={`text-right ${ACTIONS_CELL}`}>
+                  <div className="flex justify-end gap-1">
+                    <Button size="icon" variant="ghost" onClick={() => openEditor(product)} title="Sửa">
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => askDelete(product)}
+                      title="Xoá vĩnh viễn"
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </div>
@@ -465,6 +658,15 @@ function ProductListPanel({
         total={filteredProducts.length}
         onPageChange={setPage}
       />
+      {editTarget && (
+        <ProductEditDialog
+          key={editSession}
+          product={editTarget}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          onSaved={handleEditorSaved}
+        />
+      )}
       <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => { if (!deleting) setDeleteDialogOpen(open); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -511,7 +713,6 @@ function ImportPageInner() {
   const [listTab, setListTab] = useState<ListTab>("products");
   const [productSearch, setProductSearch] = useState("");
   const [saving, setSaving] = useState(false);
-  const [backfillingImages, setBackfillingImages] = useState(false);
   const [refreshingLists, setRefreshingLists] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<{
     id: EntityId;
@@ -789,62 +990,6 @@ function ImportPageInner() {
     });
   };
 
-  const backfillMissingImages = async () => {
-    setBackfillingImages(true);
-    try {
-      const products = await productsStore.list();
-      const targets: Product[] = [];
-
-      for (let index = 0; index < products.length; index += 5) {
-        const batch = products.slice(index, index + 5);
-        const checks = await Promise.all(
-          batch.map(async (product) => ({
-            product,
-            needsImage: !product.image_url || !(await canLoadImageUrl(product.image_url)),
-          })),
-        );
-        targets.push(...checks.filter((item) => item.needsImage).map((item) => item.product));
-      }
-
-      if (targets.length === 0) {
-        toast.success("Tất cả ảnh hiện tại đều load được");
-        return;
-      }
-
-      let updated = 0;
-      for (const product of targets) {
-        const result = await productLookupStore.byBarcode(product.code, { mode: "deep", refresh: true });
-        const imageUrl = await firstLoadableImageUrl([
-          ...(result.image_urls || []),
-          result.image_url,
-        ]);
-        if (!imageUrl) continue;
-
-        await productsStore.upsertByCode({
-          code: product.code,
-          name: product.name || result.name || product.code,
-          image_url: imageUrl,
-          cost_price: product.cost_price,
-          sale_price: product.sale_price,
-          stock: 0,
-          addStock: 0,
-        });
-        updated += 1;
-      }
-
-      if (updated > 0) {
-        await loadLists();
-        toast.success(`Đã cập nhật ảnh load được cho ${updated}/${targets.length} sản phẩm`);
-      } else {
-        toast.error(`Có ${targets.length} sản phẩm thiếu/ảnh lỗi nhưng chưa tìm được ảnh load được`);
-      }
-    } catch {
-      toast.error("Lỗi khi cập nhật ảnh thiếu");
-    } finally {
-      setBackfillingImages(false);
-    }
-  };
-
   const startEditPurchase = (purchase: Purchase) => {
     setEditingPurchase({
       id: purchase.id,
@@ -884,15 +1029,11 @@ function ImportPageInner() {
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
       <div className="flex shrink-0 items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-semibold">Nhập hàng</h1>
+          <h1 className="font-display text-[26px] font-extrabold leading-tight">Nhập hàng</h1>
           <p className="text-muted-foreground text-sm mt-1">Quét hoặc nhập mã, sau đó điền thông tin & lưu</p>
         </div>
         <div className="flex gap-2">
           <RefreshButton loading={refreshingLists} onClick={() => loadLists(true)} />
-          <Button variant="outline" onClick={backfillMissingImages} disabled={backfillingImages}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${backfillingImages ? "animate-spin" : ""}`} />
-            {backfillingImages ? "Đang tải ảnh..." : "Tải ảnh thiếu"}
-          </Button>
           <Button variant="outline" onClick={exportPurchases} disabled={purchases.length === 0}>
             <FileSpreadsheet className="w-4 h-4 mr-2" /> Xuất Excel
           </Button>
@@ -926,7 +1067,7 @@ function ImportPageInner() {
           </div>
           <div className="min-h-0 flex-1 overflow-auto">
             <Table className="min-w-[980px]">
-              <TableHeader className="sticky top-0 z-10 bg-card">
+              <TableHeader className="sticky top-0 z-10">
                 <TableRow>
                   <TableHead className="w-16">Ảnh</TableHead>
                   <TableHead className="w-44">Mã</TableHead>
@@ -1079,7 +1220,7 @@ function ImportPageInner() {
             <TabsContent value="history" forceMount className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
               <div className="min-h-0 flex-1 overflow-auto">
                 <Table className="min-w-[1120px]">
-                  <TableHeader className="sticky top-0 z-10 bg-card">
+                  <TableHeader className="sticky top-0 z-10">
                     <TableRow>
                       <SortableHead sortKey="id" className="w-20">ID</SortableHead>
                       <SortableHead sortKey="created_at" className="w-40">Thời gian</SortableHead>

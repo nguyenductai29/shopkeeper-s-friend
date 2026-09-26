@@ -69,7 +69,7 @@ function Inner() {
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
       <div className="flex shrink-0 items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-semibold">Công nợ khách hàng</h1>
+          <h1 className="font-display text-[26px] font-extrabold leading-tight">Công nợ khách hàng</h1>
           <p className="text-muted-foreground text-sm mt-1">Đơn hàng chưa thanh toán</p>
         </div>
         <div className="flex gap-2">

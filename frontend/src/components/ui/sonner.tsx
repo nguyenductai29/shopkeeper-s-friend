@@ -9,7 +9,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       theme={theme as ToasterProps["theme"]}
-      className="toaster group"
+      // sonner sets a system font stack (no Vietnamese stacked marks on Japanese Windows); use the app font.
+      className="toaster group font-sans"
       toastOptions={{
         classNames: {
           toast:
