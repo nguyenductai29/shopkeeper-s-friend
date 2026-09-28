@@ -6,7 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { formatMoneyInput, formatVND, parseMoneyInput } from "@/lib/format";
-import { Barcode, MapPin, Minus, Package, Plus, ScanLine, ShoppingCart, Trash2 } from "lucide-react";
+import {
+  Barcode,
+  Grid2x2,
+  Grid3x3,
+  LayoutGrid,
+  MapPin,
+  Minus,
+  Package,
+  Plus,
+  ScanLine,
+  ShoppingCart,
+  Trash2,
+} from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { toast } from "sonner";
 import { CustomerPicker } from "@/components/CustomerPicker";
 import { buildCustomerBook, foldText, phoneDigits, type CustomerSuggestion } from "@/lib/customerBook";
@@ -24,6 +37,26 @@ import {
 
 type CartItem = Product & { qty: number };
 
+// Products per row at laptop width and up: Nhỏ 5, Vừa 4, To 3. Text scales with the card.
+const GRID_LAYOUTS = {
+  sm: { label: "Nhỏ", title: "5 sản phẩm mỗi hàng", icon: Grid3x3, grid: "grid-cols-3 lg:grid-cols-5", name: "min-h-10 text-sm leading-5", price: "text-base" },
+  md: { label: "Vừa", title: "4 sản phẩm mỗi hàng", icon: LayoutGrid, grid: "grid-cols-2 lg:grid-cols-4", name: "min-h-10 text-[15px] leading-5", price: "text-lg" },
+  lg: { label: "To", title: "3 sản phẩm mỗi hàng", icon: Grid2x2, grid: "grid-cols-2 lg:grid-cols-3", name: "min-h-12 text-lg leading-6", price: "text-xl" },
+} as const;
+type GridSize = keyof typeof GRID_LAYOUTS;
+const GRID_SIZES = Object.keys(GRID_LAYOUTS) as GridSize[];
+const GRID_SIZE_KEY = "shopflow:pos-grid-size";
+
+function savedGridSize(): GridSize {
+  try {
+    const saved = localStorage.getItem(GRID_SIZE_KEY);
+    if (saved && saved in GRID_LAYOUTS) return saved as GridSize;
+  } catch {
+    // Storage can be unavailable; fall back to the default.
+  }
+  return "md";
+}
+
 export default function POS() {
   const [products, setProducts] = useState<Product[]>([]);
   const [query, setQuery] = useState("");
@@ -35,6 +68,20 @@ export default function POS() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerBook, setCustomerBook] = useState<CustomerSuggestion[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSuggestion | null>(null);
+  const [gridSize, setGridSize] = useState<GridSize>(savedGridSize);
+  const layout = GRID_LAYOUTS[gridSize];
+
+  const changeGridSize = (value: string) => {
+    // Clicking the active option sends "", which would leave nothing selected.
+    if (!(value in GRID_LAYOUTS)) return;
+    setGridSize(value as GridSize);
+    try {
+      localStorage.setItem(GRID_SIZE_KEY, value);
+    } catch {
+      // Not remembered this time; the choice still applies.
+    }
+    focusProductInput();
+  };
   const [paid, setPaid] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -281,8 +328,8 @@ export default function POS() {
       <div className="grid flex-1 min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_480px]">
         {/* Products */}
         <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
-          <form onSubmit={handleProductInputSubmit} className="shrink-0 rounded-md border bg-card p-2 shadow-elegant">
-            <div className="relative">
+          <div className="flex shrink-0 items-center gap-2 rounded-md border bg-card p-2 shadow-elegant">
+            <form onSubmit={handleProductInputSubmit} className="relative min-w-0 flex-1">
               <ScanLine className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-primary" />
               <Input
                 ref={productInputRef}
@@ -293,11 +340,34 @@ export default function POS() {
                 onChange={(e) => setQuery(e.target.value)}
                 onBlur={keepProductInputFocused}
               />
-            </div>
-          </form>
+            </form>
+            <ToggleGroup
+              type="single"
+              value={gridSize}
+              onValueChange={changeGridSize}
+              className="h-12 shrink-0 gap-0.5 rounded-md border bg-muted/40 p-1"
+              aria-label="Cỡ hiển thị sản phẩm"
+            >
+              {GRID_SIZES.map((size) => {
+                const { label, title, icon: Icon } = GRID_LAYOUTS[size];
+                return (
+                  <ToggleGroupItem
+                    key={size}
+                    value={size}
+                    title={title}
+                    // Keep focus in the search box so a scan right after clicking isn't cut short.
+                    onMouseDown={(event) => event.preventDefault()}
+                    className="h-full gap-1.5 px-3 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+                  >
+                    <Icon className="h-4 w-4" /> {label}
+                  </ToggleGroupItem>
+                );
+              })}
+            </ToggleGroup>
+          </div>
 
           <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-card p-2 shadow-elegant">
-            <div className="grid h-full min-h-0 auto-rows-max grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 overflow-y-auto pr-1">
+            <div className={`grid h-full min-h-0 auto-rows-max gap-3 overflow-y-auto pr-1 ${layout.grid}`}>
             {filtered.length === 0 && (
               <Card className="col-span-full p-12 text-center text-muted-foreground">
                 <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
@@ -331,13 +401,14 @@ export default function POS() {
                     </div>
                   )}
                 </div>
-                <div className="line-clamp-2 min-h-10 text-[15px] font-semibold leading-5">{p.name}</div>
+                <div className={`line-clamp-2 font-semibold ${layout.name}`}>{p.name}</div>
                 <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                   <Barcode className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{p.barcode || p.code}</span>
                 </div>
-                <div className="mt-auto flex items-end justify-between gap-2 pt-1.5">
-                  <div className="truncate text-lg font-bold leading-6 text-primary">{formatVND(p.sale_price)}</div>
+                {/* Wraps the stock under the price when small cards are too narrow for both. */}
+                <div className="mt-auto flex flex-wrap items-end justify-between gap-x-2 pt-1.5">
+                  <div className={`whitespace-nowrap font-bold text-primary ${layout.price}`}>{formatVND(p.sale_price)}</div>
                   <div className={`shrink-0 text-sm ${outOfStock ? "font-semibold text-destructive" : "text-muted-foreground"}`}>
                     SL: {p.stock}
                   </div>
