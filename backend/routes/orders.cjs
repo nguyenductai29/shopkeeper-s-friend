@@ -7,4 +7,5 @@ router.get('/unpaid',async(req,res,next)=>{try{res.json(await apiRequest('/api/o
 router.get('/since/:iso',async(req,res,next)=>{try{res.json(await apiRequest(`/api/orders?since=${encodeURIComponent(decodeURIComponent(req.params.iso))}`));}catch(e){next(e)}});
 router.post('/',async(req,res,next)=>{try{res.json(await apiRequest('/api/orders',{method:'POST',body:req.body}));}catch(e){next(e)}});
 router.patch('/:id/paid',async(req,res,next)=>{try{res.json(await apiRequest(`/api/orders/${req.params.id}/paid`,{method:'PATCH',body:req.body}));}catch(e){next(e)}});
+router.patch('/:id',async(req,res,next)=>{try{res.json(await apiRequest(`/api/orders/${encodeURIComponent(req.params.id)}`,{method:'PATCH',body:req.body||{}}));}catch(e){next(e)}});
 module.exports=router;

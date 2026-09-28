@@ -1,7 +1,8 @@
 // Simple localStorage-backed data store replacing Supabase.
 // All data lives in the user's browser only.
 
-export type EntityId = number;
+// The shared PostgreSQL API uses UUID strings; legacy localStorage data used numbers.
+export type EntityId = number | string;
 
 export type Product = {
   id: EntityId;
@@ -43,6 +44,11 @@ export type OrderItem = {
 
 export type Order = {
   id: EntityId;
+  // Set by the shared API (e.g. "DH00000012"); absent on legacy local orders.
+  order_code?: string | null;
+  subtotal?: number;
+  payment_status?: "unpaid" | "partial" | "paid" | "refunded";
+  customer_id?: EntityId | null;
   customer_name: string | null;
   customer_phone: string | null;
   customer_address: string | null;

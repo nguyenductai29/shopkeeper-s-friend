@@ -6,6 +6,14 @@ function apiBaseUrl() {
   return String(process.env.SHOP_KOME_API_URL || process.env.SHOPFLOW_API_URL || DEFAULT_API_BASE_URL).replace(/\/$/, '');
 }
 
+// The shared API stores uploaded images as paths on its own origin (/images/products/...).
+function resolveImageUrl(value) {
+  if (!value) return null;
+  if (/^(https?:|data:|blob:)/i.test(value)) return value;
+  const apiOrigin = apiBaseUrl().replace(/\/api\/?$/, '');
+  return `${apiOrigin}${String(value).startsWith('/') ? value : `/${value}`}`;
+}
+
 function normalizePath(path) {
   let value = String(path || '');
   if (value.startsWith('/api/')) value = value.slice(4);
@@ -89,4 +97,4 @@ async function listInventoryTransactions(productId) {
   return request(`/inventory/transactions${qs}`);
 }
 
-module.exports = { apiBaseUrl, request, apiRequest, health, listProducts, getProductById, findProductByCode, createProduct, updateProduct, uploadProductImage, deleteProductPermanently, changeInventory, listInventoryTransactions };
+module.exports = { apiBaseUrl, resolveImageUrl, request, apiRequest, health, listProducts, getProductById, findProductByCode, createProduct, updateProduct, uploadProductImage, deleteProductPermanently, changeInventory, listInventoryTransactions };

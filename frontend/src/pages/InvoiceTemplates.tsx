@@ -133,7 +133,11 @@ function Inner() {
                 <Label>VietQR trong footer</Label>
                 <Select
                   value={editing.payment_qr_id ? String(editing.payment_qr_id) : "none"}
-                  onValueChange={(value) => setEditing({ ...editing, payment_qr_id: value === "none" ? null : Number(value) })}
+                  onValueChange={(value) => setEditing({
+                    ...editing,
+                    // IDs are UUID strings; Number() would turn them into NaN and the API would store null.
+                    payment_qr_id: value === "none" ? null : paymentQrs.find((qr) => String(qr.id) === value)?.id ?? null,
+                  })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Không gắn QR" />

@@ -238,6 +238,36 @@ export const ordersStore = {
   async setPaid(id: EntityId, paid: boolean): Promise<void> {
     await apiFetch(`/orders/${id}/paid`, { method: 'PATCH', ...json({ paid }) });
   },
+  // Corrects a sale; the total follows from the discount. `paid: false` voids recorded receipts.
+  async update(id: EntityId, patch: { discount?: number; paid?: boolean }): Promise<Order> {
+    const res = await fetch(`${BASE}/orders/${id}`, { method: 'PATCH', ...json(patch) });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || `API PATCH /orders/${id} lỗi: ${res.status}`);
+    }
+    return res.json();
+  },
+};
+
+// ===== Customers =====
+export type Customer = {
+  id: EntityId;
+  customer_code: string | null;
+  name: string;
+  phone: string | null;
+  address: string | null;
+};
+
+export const customersStore = {
+  async list(): Promise<Customer[]> {
+    return apiFetch<Customer[]>('/customers');
+  },
+  async create(input: { name: string; phone?: string | null; address?: string | null }): Promise<Customer> {
+    return apiFetch<Customer>('/customers', { method: 'POST', ...json(input) });
+  },
+  async update(id: EntityId, patch: { phone?: string; address?: string }): Promise<Customer> {
+    return apiFetch<Customer>(`/customers/${id}`, { method: 'PUT', ...json(patch) });
+  },
 };
 
 // ===== Order Items =====

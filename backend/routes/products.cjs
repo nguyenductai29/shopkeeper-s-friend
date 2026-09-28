@@ -2,7 +2,7 @@
 
 const express = require('express');
 const {
-  apiBaseUrl,
+  resolveImageUrl,
   listProducts,
   getProductById,
   findProductByCode,
@@ -18,13 +18,6 @@ const router = express.Router();
 // Same formats and size limit the shared API accepts; it converts the upload to WebP.
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
-
-function resolveImageUrl(value) {
-  if (!value) return null;
-  if (/^(https?:|data:|blob:)/i.test(value)) return value;
-  const apiOrigin = apiBaseUrl().replace(/\/api\/?$/, '');
-  return `${apiOrigin}${String(value).startsWith('/') ? value : `/${value}`}`;
-}
 
 function toLegacyProduct(product) {
   if (!product) return null;
